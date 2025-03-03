@@ -1,7 +1,7 @@
 <?php   
 /**
  * Plugin Name: Booking Calendar Plugin
- * Description: A plugin for admin to book time slots and display them with colors.
+ * Description: 
  * Version: 1.0
  * Author: makerspace
  */
