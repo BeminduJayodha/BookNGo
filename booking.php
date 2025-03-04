@@ -1,6 +1,6 @@
 <?php   
 /**
- * Plugin Name: Booking Calendar Plugin
+ * Plugin Name: 
  * Description: 
  * Version: 1.0
  * Author: makerspace
@@ -502,9 +502,22 @@ function display_month_view($bookings, $current_month, $current_year) {
     $start_day = date('N', $first_day_of_month);  // 1 = Monday, 7 = Sunday
     $num_days = date('t', $first_day_of_month);   // Number of days in the month
 
-    // Calculate number of previous month's days to display
-    $previous_month_days = date('t', strtotime("{$current_year}-" . ($current_month - 1) . "-01"));
-    $next_month_days = 1; // Start from 1 for next month days
+    // Query the database to get existing bookings
+    global $wpdb;
+    $booked_times = $wpdb->get_results("
+        SELECT booking_date, start_time, end_time 
+        FROM wp_booking_calendar 
+        WHERE YEAR(booking_date) = {$current_year} AND MONTH(booking_date) = {$current_month}
+    ");
+
+    // Create a structure to store booked times by date
+    $booked_times_by_date = [];
+    foreach ($booked_times as $booking) {
+        $booked_times_by_date[$booking->booking_date][] = [
+            'start_time' => $booking->start_time,
+            'end_time' => $booking->end_time
+        ];
+    }
 
     echo '<table class="booking-table" border="1" cellspacing="0" cellpadding="5" style="width:100%; text-align:center; border-collapse: collapse; table-layout: fixed;"> 
             <thead>
@@ -521,7 +534,9 @@ function display_month_view($bookings, $current_month, $current_year) {
             <tbody>';
 
     $current_day = 1;
-    $previous_month_day = $previous_month_days - $start_day + 2; // Start from the day before the first of the month
+    $previous_month_day = date('t', strtotime("{$current_year}-" . ($current_month - 1) . "-01")) - $start_day + 2; // Start from the day before the first of the month
+    $next_month_days = 1; // Start from 1 for next month days
+
     for ($row = 1; $row <= 5; $row++) { // Assuming 5 weeks per month
         echo '<tr>';
         for ($day = 1; $day <= 7; $day++) {
@@ -537,15 +552,53 @@ function display_month_view($bookings, $current_month, $current_year) {
                     $booked_time_str .= esc_html($booking->customer_name) . '<br>' . esc_html($booking->start_time . ' - ' . $booking->end_time);
                     $booked_time_str .= '<br><small>Type: ' . esc_html($booking->booking_type) . '</small>';  // Added booking type
                     $booked_time_str .= '</div>';
-
                 }
             }
 
-            // If the current day is within the number of days in the month, display it
+            // Fetch booked times for the current date
+            $booked_times_on_date = isset($booked_times_by_date[$current_cell_date]) ? $booked_times_by_date[$current_cell_date] : [];
+
+            // Define the available slots
+            $available_slots = [];
+            $slot_start_time = strtotime('08:00');
+            $slot_end_time = strtotime('19:00');
+
+            // Generate available slots by checking against booked times only if the day has bookings
+            if (!empty($booked_times_on_date)) {
+                for ($i = $slot_start_time; $i < $slot_end_time; $i += 3600) {
+                    $start_time = date('H:i', $i);
+                    $end_time = date('H:i', $i + 3600);
+                    $is_available = true;
+
+                    // Check if the slot is already booked
+                    foreach ($booked_times_on_date as $booked_time) {
+                        if (($start_time >= $booked_time['start_time'] && $start_time < $booked_time['end_time']) ||
+                            ($end_time > $booked_time['start_time'] && $end_time <= $booked_time['end_time'])) {
+                            $is_available = false;
+                            break;
+                        }
+                    }
+
+                    if ($is_available) {
+                        $available_slots[] = $start_time . ' - ' . $end_time;
+                    }
+                }
+            }
+
+            // Only show the available slots if there are bookings for the day
             if (($row == 1 && $day >= $start_day) || ($row > 1 && $current_day <= $num_days)) {
-                echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
-                      style="border: 1px solid #000; height: 100px; vertical-align: top; width: 14.28%; 
-                      text-align: right; padding: 5px;" onclick="showBookingModal(\'' . $current_cell_date . '\')">' . $current_day . $booked_time_str . '</td>';
+                if (!empty($bookings_on_date)) {
+                    echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
+                    style="border: 1px solid #000; height: 100px; vertical-align: top; width: 14.28%; 
+                    text-align: right; padding: 5px;" 
+                    onclick="showBookingModal(\'' . $current_cell_date . '\', \'' . implode(',', $available_slots) . '\')">' . 
+                    $current_day . $booked_time_str . '</td>';
+                } else {
+                    // If there are no bookings, just display the date with any existing bookings
+                    echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
+                    style="border: 1px solid #000; height: 100px; vertical-align: top; width: 14.28%; text-align: right; padding: 5px;" 
+                    onclick="showBookingModal(\'' . $current_cell_date . '\', \'\')">' . $current_day . $booked_time_str . '</td>';
+                }
                 $current_day++;
             } else {
                 // Handle previous month's dates
@@ -579,61 +632,80 @@ function display_month_view($bookings, $current_month, $current_year) {
 
     // Add booking modal HTML
     // Assuming you have a table `wp_booking_customers` where the customer names are stored
-global $wpdb;
+    global $wpdb;
 
-// Query the database to get customer names from the wp_booking_customers table
-$customers = $wpdb->get_results("SELECT customer_name FROM wp_booking_customers");
+    // Query the database to get customer names from the wp_booking_customers table
+    $customers = $wpdb->get_results("SELECT customer_name FROM wp_booking_customers");
 
-// Start the modal HTML with the dropdown
-echo '<div id="bookingModal" class="modal" style="display:none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 9999;">
-        <div class="modal-content" style="background: #fff; width: 400px; margin: 100px auto; padding: 20px; border-radius: 8px;">
-            <h2>Book Time Slot</h2>
-            <form id="bookingForm">
-                <input type="hidden" name="booking_date" id="bookingDate">
-                
-                <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <label for="customer_name">Customer Name:</label>
-                    <select name="customer_name" id="customer_name" required style="width: 100%;">
-                        ';
-                
-// Fetch customers from the database as before
-if (!empty($customers)) {
-    foreach ($customers as $customer) {
-        echo '<option value="' . esc_attr($customer->customer_name) . '">' . esc_html($customer->customer_name) . '</option>';
-    }
-} else {
-    echo '<option value="">No customers found</option>';
-}
-
-echo '</select>
-
-                    <label for="booking_type">Booking Type:</label>
-                    <select name="booking_type" id="booking_type" required style="width: 100%;">
-                        <option value="Class Rent">Class Rent</option>
-                        <option value="Conference Rent">Conference Rent</option>
-                        <option value="Workspace Rent">Workspace Rent</option>
-                    </select>
-
-                    <div style="display: flex; justify-content: space-between; gap: 10px;">
-                        <div style="flex: 1;">
-                            <label for="start_time">Start Time:</label>
-                            <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;">
-                        </div>
-                        <div style="flex: 1;">
-                            <label for="end_time">End Time:</label>
-                            <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;">
-                        </div>
-                    </div>
+    // Start the modal HTML with the dropdown
+    echo '<div id="bookingModal" class="modal" style="display:none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 9999;">
+            <div class="modal-content" style="background: #fff; width: 400px; margin: 100px auto; padding: 20px; border-radius: 8px;">
+                <h2>Book Time Slot</h2>
+                <form id="bookingForm">
+                    <input type="hidden" name="booking_date" id="bookingDate">
                     
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
-                        <input type="submit" value="Save Booking" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">
-                        <button type="button" onclick="closeBookingModal()" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">Close</button>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>';
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <label for="customer_name">Customer Name:</label>
+                        <select name="customer_name" id="customer_name" required style="width: 100%;">';
+                    
+    // Fetch customers from the database as before
+    if (!empty($customers)) {
+        foreach ($customers as $customer) {
+            echo '<option value="' . esc_attr($customer->customer_name) . '">' . esc_html($customer->customer_name) . '</option>';
+        }
+    } else {
+        echo '<option value="">No customers found</option>';
+    }
 
+    echo '</select>
+
+                        <label for="booking_type">Booking Type:</label>
+                        <select name="booking_type" id="booking_type" required style="width: 100%;">
+                            <option value="Class Rent">Class Rent</option>
+                            <option value="Conference Rent">Conference Rent</option>
+                            <option value="Workspace Rent">Workspace Rent</option>
+                        </select>
+                        
+                        <label>Available Time Slots:</label>
+                        <div id="availableSlots" style="margin-bottom: 10px;"></div>
+
+                        <div style="display: flex; justify-content: space-between; gap: 10px;">
+                            <div style="flex: 1;">
+                                <label for="start_time">Start Time:</label>
+                                <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;">
+                            </div>
+                            <div style="flex: 1;">
+                                <label for="end_time">End Time:</label>
+                                <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;">
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; gap: 10px;">
+    <div style="flex: 1;">
+        <label for="start_date">Start Date:</label>
+        <input type="date" name="start_date" id="start_date" required style="width: 100%;" readonly>
+    </div>
+    <div style="flex: 1;">
+        <label for="end_date">End Date(s):</label>
+        <input type="date" id="end_date" style="width: 100%;">
+        <button type="button" onclick="addEndDate()">Add Date</button>
+    </div>
+</div>
+
+<!-- Display Selected End Dates -->
+<div id="selectedDatesContainer" style="margin-top: 10px;">
+    <label>Selected End Dates:</label>
+    <ul id="selectedDatesList"></ul>
+</div>
+
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                            <input type="submit" value="Save Booking" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">
+                            <button type="button" onclick="closeBookingModal()" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">Close</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>';
 
 }
 
@@ -641,36 +713,133 @@ echo '</select>
 function booking_calendar_modal_js() {
     ?>
     <script type="text/javascript">
-        function showBookingModal(date) {
-            document.getElementById('bookingDate').value = date;
-            document.getElementById('bookingModal').style.display = 'block';
+        function showBookingModal(date, availableSlots) {
+    document.getElementById("bookingDate").value = date;
+
+    // Set the start date as the clicked date
+    document.getElementById("start_date").value = date;
+
+    // Allow multiple date selections for the end date
+    document.getElementById("end_date").value = ""; // Clear previous selections
+
+    // Update available slots inside the modal with checkboxes
+    let slotsContainer = document.getElementById("availableSlots");
+    if (slotsContainer) {
+        slotsContainer.innerHTML = ""; // Clear previous slots
+
+        if (availableSlots) {
+            let slotsArray = availableSlots.split(",");
+            slotsArray.forEach(slot => {
+                let slotElement = document.createElement("div");
+                slotElement.style.margin = "5px 0";
+
+                let checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.name = "selected_slots[]";
+                checkbox.value = slot;
+                checkbox.addEventListener('change', function() {
+                    updateStartEndTime(); // Update the start and end times when checkbox is toggled
+                });
+                slotElement.appendChild(checkbox);
+
+                let label = document.createElement("label");
+                label.textContent = slot;
+                slotElement.appendChild(label);
+
+                slotsContainer.appendChild(slotElement);
+            });
+        } else {
+            slotsContainer.innerHTML = "<p>No available slots</p>";
         }
+    }
+
+    document.getElementById("bookingModal").style.display = "block";
+}
+let selectedEndDates = [];
+
+function addEndDate() {
+    let endDateInput = document.getElementById("end_date");
+    let selectedDate = endDateInput.value;
+
+    if (selectedDate && !selectedEndDates.includes(selectedDate)) {
+        selectedEndDates.push(selectedDate);
+        updateSelectedDatesDisplay();
+    }
+}
+
+// Function to update displayed selected dates
+function updateSelectedDatesDisplay() {
+    let selectedDatesList = document.getElementById("selectedDatesList");
+    selectedDatesList.innerHTML = ""; // Clear previous list
+
+    selectedEndDates.forEach(date => {
+        let listItem = document.createElement("li");
+        listItem.textContent = date;
+        
+        // Add remove button for each date
+        let removeButton = document.createElement("button");
+        removeButton.textContent = "Remove";
+        removeButton.style.marginLeft = "10px";
+        removeButton.onclick = function () {
+            selectedEndDates = selectedEndDates.filter(d => d !== date);
+            updateSelectedDatesDisplay();
+        };
+
+        listItem.appendChild(removeButton);
+        selectedDatesList.appendChild(listItem);
+    });
+}
+
+
+// Function to update start_time and end_time based on selected slots
+function updateStartEndTime() {
+    let selectedSlots = [];
+    let checkboxes = document.querySelectorAll('input[name="selected_slots[]"]:checked');
+    checkboxes.forEach(checkbox => {
+        selectedSlots.push(checkbox.value);
+    });
+
+    if (selectedSlots.length > 0) {
+        // Set the start time and end time based on the selected slots
+        let firstSlot = selectedSlots[0].split(' - ');
+        let lastSlot = selectedSlots[selectedSlots.length - 1].split(' - ');
+
+        document.getElementById("start_time").value = firstSlot[0];  // Start time
+        document.getElementById("end_time").value = lastSlot[1];    // End time
+    } else {
+        // If no slots are selected, reset the time fields
+        document.getElementById("start_time").value = '';
+        document.getElementById("end_time").value = '';
+    }
+}
+
 
         function closeBookingModal() {
             document.getElementById('bookingModal').style.display = 'none';
         }
 
         jQuery(document).ready(function ($) {
-    $('#bookingForm').submit(function (e) {
-        e.preventDefault();
+            $('#bookingForm').submit(function (e) {
+                e.preventDefault();
 
-        var formData = $(this).serialize();
+                var formData = $(this).serialize();
 
-        $.post(ajaxurl, formData + '&action=save_booking', function (response) {
-            if (response.success) {
-                window.location.href = response.data.invoice_url;
-            } else {
-                alert('Booking failed. Please try again.');
-            }
+                $.post(ajaxurl, formData + '&action=save_booking', function (response) {
+                    if (response.success) {
+                        window.location.href = response.data.invoice_url;
+                    } else {
+                        alert('Booking failed. Please try again.');
+                    }
+                });
+            });
         });
-    });
-});
-
-
     </script>
     <?php
 }
 add_action('admin_footer', 'booking_calendar_modal_js');
+
+
+
 
 
 
