@@ -23,6 +23,8 @@ function booking_calendar_install() {
     $sql1 = "CREATE TABLE $table_name (
         id INT NOT NULL AUTO_INCREMENT,
         customer_name VARCHAR(255) NOT NULL,
+        start_date DATE NOT NULL,
+        end_date DATE NOT NULL,
         booking_date DATE NOT NULL,
         start_time TIME NOT NULL,
         end_time TIME NOT NULL,
@@ -45,6 +47,7 @@ function booking_calendar_install() {
     // Customers Table
     $sql3 = "CREATE TABLE $customer_table (
         id INT NOT NULL AUTO_INCREMENT,
+        customer_type VARCHAR(50) NOT NULL,
         customer_name VARCHAR(255) NOT NULL,
         customer_email VARCHAR(255) NOT NULL,
         customer_phone VARCHAR(20) NOT NULL,
@@ -84,135 +87,173 @@ function booking_calendar_menu() {
     
     // Add submenu for Customer Registration
     add_submenu_page('booking-calendar', 'Customer Registration', 'Customer Registration', 'manage_options', 'customer-registration', 'customer_registration_page');
+    add_submenu_page('booking-calendar', 'Customer List', 'Customer List', 'manage_options', 'customer-list', 'customer_list_page');
+    add_submenu_page('booking-calendar', 'Customer Edit', 'Customer Edit', 'manage_options', 'customer-edit', 'customer_edit_page');
 }
 add_action('admin_menu', 'booking_calendar_menu');
 
 function customer_registration_page() {
     ?>
-    <style>
-        .customer-form-container {
-            max-width: 500px;
-            min-height: 500px; /* Increased height */
-            margin: 50px auto;
-            padding: 30px; /* More padding for better spacing */
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            justify-content: center; /* Center content vertically */
-        }
+<style>
+    .customer-form-container {
+        max-width: 500px;
+        min-height: 400px;
+        margin: 50px auto;
+        padding: 30px;
+        background: #fff;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
 
+    .customer-form-container h2 {
+        margin-bottom: 20px;
+    }
 
-        .customer-form-container h2 {
-            margin-bottom: 20px;
-        }
+    .customer-form-container .form-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
 
-        .customer-form-container .form-table {
+    .customer-form-container th,
+    .customer-form-container td {
+        padding: 8px;
+        vertical-align: middle; /* Ensures both label and input/select align */
+    }
+
+    .customer-form-container th {
+        text-align: left;
+        padding-right: 10px;
+        width: 40%;
+        vertical-align: middle; /* Ensures labels align properly */
+        white-space: nowrap;  /* Prevents label from wrapping */
+    }
+
+    .customer-form-container input,
+    .customer-form-container select {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        height: 40px; /* Ensures same height */
+        box-sizing: border-box; /* Prevents padding from increasing size */
+    }
+
+    .customer-form-container select {
+        appearance: none; /* Removes default browser styles */
+    }
+
+    .customer-form-container .submit {
+        width: 100%;
+        background: #0073aa;
+        color: white;
+        padding: 10px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        margin-top: 10px;
+    }
+
+    .customer-form-container .submit:hover {
+        background: #005f8d;
+    }
+
+    .popup-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.3);
+        justify-content: center;
+        align-items: flex-start;
+        padding-top: 20px;
+    }
+
+    .popup-box {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
+        text-align: center;
+        max-width: 400px;
+        width: 90%;
+    }
+
+    .popup-box h3 {
+        margin-bottom: 15px;
+    }
+
+    .popup-box button {
+        background: #0073aa;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+    }
+
+    .popup-box button:hover {
+        background: #005f8d;
+    }
+        .customer-table {
             width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
         }
 
-        .customer-form-container input {
-            width: 100%;
-            padding: 8px;
-            margin-top: 5px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-        }
-
-        .customer-form-container .submit {
-            width: 100%;
-            background: #0073aa;
-            color: white;
+        .customer-table th, .customer-table td {
             padding: 10px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            margin-top: 10px;
+            text-align: left;
+            border: 1px solid #ddd;
         }
 
-        .customer-form-container .submit:hover {
-            background: #005f8d;
+        .customer-table th {
+            background-color: #f4f4f4;
         }
+</style>
 
-        /* Popup Modal Styles */
-       /* Popup Overlay */
-       .popup-overlay {
-           display: none;
-           position: fixed;
-           top: 0;
-           left: 0;
-           width: 100%;
-           height: 100%;
-           background: rgba(0, 0, 0, 0.3);
-           justify-content: center;
-           align-items: flex-start; /* Align at the top */
-           padding-top: 20px; /* Adjust spacing from top */
-       }
-       
-       /* Popup Box */
-       .popup-box {
-           background: white;
-           padding: 20px;
-           border-radius: 8px;
-           box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
-           text-align: center;
-           max-width: 400px;
-           width: 90%;
-       }
-
-
-        .popup-box h3 {
-            margin-bottom: 15px;
-        }
-
-        .popup-box button {
-            background: #0073aa;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-
-        .popup-box button:hover {
-            background: #005f8d;
-        }
-    </style>
-
-    <div class="wrap">
-        <div class="customer-form-container">
-            <h2>Customer Registration</h2>
-            <form method="post" id="customer-registration-form">
-                <table class="form-table">
-                    <tr>
-                        <th><label for="customer_name">Customer Name</label></th>
-                    </tr>
-                    <tr>
-                        <td><input type="text" name="customer_name" id="customer_name" required></td>
-                    </tr>
-                    <tr>
-                        <th><label for="customer_email">Email</label></th>
-                    </tr>
-                    <tr>
-                        <td><input type="email" name="customer_email" id="customer_email" required></td>
-                    </tr>
-                    <tr>
-                        <th><label for="customer_phone">Phone</label></th>
-                    </tr>
-                    <tr>
-                        <td><input type="text" name="customer_phone" id="customer_phone" required></td>
-                    </tr>
-                </table>
-                <?php submit_button('Register Customer', 'primary', 'register_customer', false); ?>
-            </form>
-        </div>
+<div class="wrap"> 
+    <div class="customer-form-container">
+        <h2>Customer Registration</h2>
+        <form method="post" id="customer-registration-form">
+            <table class="form-table">
+                <tr>
+                    <th><label for="customer_type">Customer Type</label></th>
+                    <td>
+                        <select name="customer_type" id="customer_type" required>
+                            <option value="">Select Customer Type</option>
+                            <option value="teacher">Teacher</option>
+                            <option value="workspace">Workspace</option>
+                            <option value="conference">Conference</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="customer_name">Customer Name</label></th>
+                    <td><input type="text" name="customer_name" id="customer_name" required></td>
+                </tr>
+                <tr>
+                    <th><label for="customer_email">Email</label></th>
+                    <td><input type="email" name="customer_email" id="customer_email" required></td>
+                </tr>
+                <tr>
+                    <th><label for="customer_phone">Phone</label></th>
+                    <td><input type="text" name="customer_phone" id="customer_phone" required></td>
+                </tr>
+            </table>
+            <?php submit_button('Register Customer', 'primary', 'register_customer', false); ?>
+        </form>
     </div>
+</div>
 
-    <!-- Popup Modal -->
+       
+            
+                        <!-- Popup Modal -->
     <div class="popup-overlay" id="popup">
         <div class="popup-box">
             <h3>Customer Registered Successfully!</h3>
@@ -220,65 +261,235 @@ function customer_registration_page() {
         </div>
     </div>
 
-    <script>
-        document.addEventListener("DOMContentLoaded", function () {
-            const form = document.getElementById("customer-registration-form");
-            form.addEventListener("submit", function (event) {
-                event.preventDefault(); // Prevent form submission
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const form = document.getElementById("customer-registration-form");
+        form.addEventListener("submit", function (event) {
+            // Basic validation for customer type selection
+            if (document.getElementById("customer_type").value === "") {
+                alert("Please select a customer type.");
+                event.preventDefault();
+                return;
+            }
 
-                const formData = new FormData(form);
+            event.preventDefault(); // Prevent form default submission
+            const formData = new FormData(form);
 
-                fetch("", {
-                    method: "POST",
-                    body: formData
-                })
-                .then(response => response.text())
-                .then(() => {
-                    document.getElementById("popup").style.display = "flex"; // Show popup
-                });
+            fetch("", {
+                method: "POST",
+                body: formData
+            })
+            .then(response => response.text())
+            .then(() => {
+                document.getElementById("popup").style.display = "flex";
             });
         });
-    </script>
+    });
+</script>
 
-    <?php
-    // Handle form submission in PHP
-    if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_customer'])) {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'booking_customers';
+<?php
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_customer'])) {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'booking_customers';
 
-        $customer_name = sanitize_text_field($_POST['customer_name']);
-        $customer_email = sanitize_email($_POST['customer_email']);
-        $customer_phone = sanitize_text_field($_POST['customer_phone']);
+    $customer_name  = sanitize_text_field($_POST['customer_name']);
+    $customer_email = sanitize_email($_POST['customer_email']);
+    $customer_phone = sanitize_text_field($_POST['customer_phone']);
+    $customer_type  = sanitize_text_field($_POST['customer_type']);
 
-        $wpdb->insert($table_name, [
-            'customer_name' => $customer_name,
-            'customer_email' => $customer_email,
-            'customer_phone' => $customer_phone
-        ]);
+    $wpdb->insert($table_name, [
+        'customer_name'  => $customer_name,
+        'customer_email' => $customer_email,
+        'customer_phone' => $customer_phone,
+        'customer_type'  => $customer_type
+    ]);
 
-        exit; // Stop PHP execution since the success message is handled by JavaScript
+
+
+    exit;  // Stop further execution as the success message is handled by JavaScript
+}
+
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'booking_customers';
+
+    $customer_name  = sanitize_text_field($_POST['customer_name']);
+    $customer_email = sanitize_email($_POST['customer_email']);
+    $customer_phone = sanitize_text_field($_POST['customer_phone']);
+    $customer_type  = sanitize_text_field($_POST['customer_type']);
+
+    $wpdb->insert($table_name, [
+        'customer_name'  => $customer_name,
+        'customer_email' => $customer_email,
+        'customer_phone' => $customer_phone,
+        'customer_type'  => $customer_type
+    ]);
+     // Prepare the email content
+     $subject = "Welcome to Our Service";
+     $message = "
+     Hello $customer_name,
+     
+     Thank you for registering with us. We are excited to have you as a $customer_type.
+     
+     If you have any questions or need assistance, feel free to contact us.
+     
+     Best Regards,
+     Makerspace Team
+     ";
+     
+     // Set email headers to ensure it comes from your company's email
+     $headers = [
+         'From: Your Company Name <no-reply@makerspace.lk>',
+         'Content-Type: text/html; charset=UTF-8'
+     ];
+     
+     // Send the email
+     wp_mail($customer_email, $subject, nl2br($message), $headers);
+
+    echo "<div class='updated'><p>Customer Registered Successfully!</p></div>";
+}
+
+}
+function customer_list_page() { 
+    global $wpdb;
+    // Handle customer deletion
+    if (isset($_GET['delete_customer']) && is_numeric($_GET['delete_customer'])) {
+        $customer_id = $_GET['delete_customer'];
+
+        // Delete the customer from the database
+        $wpdb->delete(
+            "{$wpdb->prefix}booking_customers", 
+            array('id' => $customer_id), 
+            array('%d')
+        );
+
+        // Redirect to the customer list page after deletion
+        wp_redirect(admin_url('admin.php?page=customer-list'));
+        exit;
     }
+    // Fetch customers from wp_booking_customers table
+    $results = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}booking_customers");
+
+    ?>
+    <div class="wrap">
+        <h1>Customer List</h1>
+        
+        <?php if (!empty($results)): ?>
+            <table class="wp-list-table widefat fixed striped customers" style="border-collapse: collapse; width: 100%;">
+                <thead>
+                    <tr style="border: 1px solid black;">
+                        <th style="border: 1px solid black; font-weight: bold; text-align: center;">Customer Type</th>
+                        <th style="border: 1px solid black; font-weight: bold; text-align: center;">Customer Name</th>
+                        <th style="border: 1px solid black; font-weight: bold; text-align: center;">Email</th>
+                        <th style="border: 1px solid black; font-weight: bold; text-align: center;">Phone</th>
+                        <th style="border: 1px solid black; font-weight: bold; text-align: center;">Date Registered</th>
+                        <th style="border: 1px solid black; font-weight: bold; text-align: center;">Actions</th>
 
 
-
-    // Process form submission
-    if ($_SERVER["REQUEST_METHOD"] == "POST") {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'booking_customers';
-
-        $customer_name = sanitize_text_field($_POST['customer_name']);
-        $customer_email = sanitize_email($_POST['customer_email']);
-        $customer_phone = sanitize_text_field($_POST['customer_phone']);
-
-        $wpdb->insert($table_name, [
-            'customer_name' => $customer_name,
-            'customer_email' => $customer_email,
-            'customer_phone' => $customer_phone
-        ]);
-
-        echo "<div class='updated'><p>Customer Registered Successfully!</p></div>";
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($results as $customer): ?>
+                        <tr style="border: 1px solid black;">
+                            <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->customer_type); ?></td>
+                            <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->customer_name); ?></td>
+                            <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->customer_email); ?></td>
+                            <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->customer_phone); ?></td>
+                            <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->date_registered); ?></td>
+                            <td style="border: 1px solid black; text-align: center;">
+                                <a href="<?php echo admin_url('admin.php?page=customer-edit&customer_id=' . $customer->id); ?>" 
+                                title="Edit" style="text-decoration: none; color: #0073aa;">
+                                <span class="dashicons dashicons-edit"></span>
+                                </a> |
+                                <a href="<?php echo admin_url('admin.php?page=customer-list&delete_customer=' . $customer->id); ?>" 
+                                   onclick="return confirm('Are you sure you want to delete this customer?');" 
+                                   title="Delete" style="text-decoration: none; color: #0073aa;">
+                                   <span class="dashicons dashicons-trash"></span>
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php else: ?>
+            <p>No customers registered yet.</p>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+function customer_edit_page() {
+    global $wpdb;
+    
+    // Check if customer_id is set and valid
+    if (isset($_GET['customer_id']) && is_numeric($_GET['customer_id'])) {
+        $customer_id = $_GET['customer_id'];
+        
+        // Fetch the customer data
+        $customer = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_customers WHERE id = $customer_id");
+        
+        if ($customer) {
+            if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+                // Handle form submission and update the database
+                $customer_type = sanitize_text_field($_POST['customer_type']);
+                $customer_email = sanitize_email($_POST['customer_email']);
+                $customer_phone = sanitize_text_field($_POST['customer_phone']);
+                
+                // Update customer data in the database
+                $wpdb->update(
+                    "{$wpdb->prefix}booking_customers",
+                    array(
+                        'customer_type' => $customer_type,
+                        'customer_email' => $customer_email,
+                        'customer_phone' => $customer_phone
+                    ),
+                    array('id' => $customer_id),
+                    array('%s', '%s', '%s'),
+                    array('%d')
+                );
+                
+                // Redirect to the customer list page after saving
+                wp_redirect(admin_url('admin.php?page=customer-list'));
+                exit;
+            }
+            
+            ?>
+            <div class="wrap">
+                <h1>Edit Customer</h1>
+                <form method="POST">
+                    <table class="form-table">
+                        <tr>
+                            <th><label for="customer_type">Customer Type</label></th>
+                            <td>
+                                <select name="customer_type" id="customer_type" required>
+                                    <option value="teacher" <?php selected($customer->customer_type, 'teacher'); ?>>Teacher</option>
+                                    <option value="workspace" <?php selected($customer->customer_type, 'workspace'); ?>>Workspace</option>
+                                    <option value="conference" <?php selected($customer->customer_type, 'conference'); ?>>Conference</option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th><label for="customer_email">Email</label></th>
+                            <td><input type="email" name="customer_email" id="customer_email" value="<?php echo esc_attr($customer->customer_email); ?>" required></td>
+                        </tr>
+                        <tr>
+                            <th><label for="customer_phone">Phone</label></th>
+                            <td><input type="text" name="customer_phone" id="customer_phone" value="<?php echo esc_attr($customer->customer_phone); ?>" required></td>
+                        </tr>
+                    </table>
+                    <p class="submit">
+                        <input type="submit" name="submit" id="submit" class="button button-primary" value="Save Changes">
+                    </p>
+                </form>
+            </div>
+            <?php
+        } else {
+            echo '<p>Customer not found.</p>';
+        }
+    } else {
+        echo '<p>No customer ID provided.</p>';
     }
 }
+
 
 
 
@@ -331,7 +542,6 @@ function display_invoice_page() {
     echo '</tbody>
           </table>';
 }
-
 
 
 // Booking calendar page with a structured table layout and navigation
@@ -436,34 +646,46 @@ function booking_calendar_page() {
 
 
 // Handle the booking form submission via AJAX
-function save_booking() {
+function save_booking() { 
     global $wpdb;
 
     // Get data from the AJAX request
     $customer_name = sanitize_text_field($_POST['customer_name']);
     $start_time = sanitize_text_field($_POST['start_time']);
     $end_time = sanitize_text_field($_POST['end_time']);
-    $booking_date = sanitize_text_field($_POST['booking_date']);
+    $start_date = sanitize_text_field($_POST['start_date']); // Start date of the teacher's class
+    $end_date = sanitize_text_field($_POST['end_date']); // End date of the teacher's class
     $booking_type = sanitize_text_field($_POST['booking_type']);
+
+    // Convert start and end dates to DateTime objects
+    $start_date = new DateTime($start_date);
+    $end_date = new DateTime($end_date);
 
     // Generate a random color
     $color = '#' . strtoupper(dechex(rand(0, 0xFFFFFF)));
 
-    // Save the booking
-    $wpdb->insert(
-        $wpdb->prefix . 'booking_calendar',
-        array(
-            'customer_name' => $customer_name,
-            'start_time' => $start_time,
-            'end_time' => $end_time,
-            'booking_date' => $booking_date,
-            'color' => $color,
-            'booking_type' => $booking_type
-        )
-    );
+    // Loop through the weeks, booking the class on the same weekday until the end date
+    $current_date = clone $start_date; // Clone the start date to modify it
+    while ($current_date <= $end_date) {
+        // Format the current date as 'Y-m-d' for the booking
+        $booking_date = $current_date->format('Y-m-d');
 
-    // Get the booking ID
-    $booking_id = $wpdb->insert_id;
+        // Insert the booking into the database for this date
+        $wpdb->insert(
+            $wpdb->prefix . 'booking_calendar',
+            array(
+                'customer_name' => $customer_name,
+                'start_time' => $start_time,
+                'end_time' => $end_time,
+                'booking_date' => $booking_date,
+                'color' => $color,
+                'booking_type' => $booking_type
+            )
+        );
+
+        // Move to the next week (same day of the week)
+        $current_date->modify('+1 week');
+    }
 
     // Generate an invoice number
     $invoice_number = 'INV-' . strtoupper(uniqid());
@@ -472,6 +694,7 @@ function save_booking() {
     $amount = ($booking_type == 'premium') ? 100.00 : 50.00;
 
     // Save invoice in the database
+    $booking_id = $wpdb->insert_id;
     $wpdb->insert(
         $wpdb->prefix . 'booking_invoices',
         array(
@@ -494,8 +717,8 @@ function save_booking() {
     ]);
 }
 
-
 add_action('wp_ajax_save_booking', 'save_booking');
+
 function display_month_view($bookings, $current_month, $current_year) {
     // Calculate the first day of the month and number of days
     $first_day_of_month = strtotime("{$current_year}-{$current_month}-01");
@@ -588,11 +811,13 @@ function display_month_view($bookings, $current_month, $current_year) {
             // Only show the available slots if there are bookings for the day
             if (($row == 1 && $day >= $start_day) || ($row > 1 && $current_day <= $num_days)) {
                 if (!empty($bookings_on_date)) {
-                    echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
+                    // Assuming that $booking->id is available as the unique identifier for each booking
+echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
                     style="border: 1px solid #000; height: 100px; vertical-align: top; width: 14.28%; 
                     text-align: right; padding: 5px;" 
                     onclick="showBookingModal(\'' . $current_cell_date . '\', \'' . implode(',', $available_slots) . '\')">' . 
                     $current_day . $booked_time_str . '</td>';
+
                 } else {
                     // If there are no bookings, just display the date with any existing bookings
                     echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
@@ -631,192 +856,192 @@ function display_month_view($bookings, $current_month, $current_year) {
             </table>';
 
     // Add booking modal HTML
-    // Assuming you have a table `wp_booking_customers` where the customer names are stored
-    global $wpdb;
+// Add booking modal HTML
+global $wpdb;
 
-    // Query the database to get customer names from the wp_booking_customers table
-    $customers = $wpdb->get_results("SELECT customer_name FROM wp_booking_customers");
+// Query the database to get customer names and types from the wp_booking_customers table
+$customers = $wpdb->get_results("SELECT customer_name, customer_type FROM wp_booking_customers");
 
-    // Start the modal HTML with the dropdown
-    echo '<div id="bookingModal" class="modal" style="display:none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 9999;">
-            <div class="modal-content" style="background: #fff; width: 400px; margin: 100px auto; padding: 20px; border-radius: 8px;">
-                <h2>Book Time Slot</h2>
-                <form id="bookingForm">
-                    <input type="hidden" name="booking_date" id="bookingDate">
-                    
-                    <div style="display: flex; flex-direction: column; gap: 10px;">
-                        <label for="customer_name">Customer Name:</label>
-                        <select name="customer_name" id="customer_name" required style="width: 100%;">';
-                    
-    // Fetch customers from the database as before
-    if (!empty($customers)) {
-        foreach ($customers as $customer) {
-            echo '<option value="' . esc_attr($customer->customer_name) . '">' . esc_html($customer->customer_name) . '</option>';
-        }
-    } else {
-        echo '<option value="">No customers found</option>';
+// Start the modal HTML with the dropdown
+echo '<div id="bookingModal" class="modal" style="display:none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 9999;">
+        <div class="modal-content" style="background: #fff; width: 400px; margin: 100px auto; padding: 20px; border-radius: 8px;">
+            <h2>Book Time Slot</h2>
+            <form id="bookingForm">
+                <input type="hidden" name="booking_date" id="bookingDate">
+                
+                <label for="booking_type">Booking Type:</label>
+                <select name="booking_type" id="booking_type" required style="width: 100%;">
+                    <option value="Class Rent">Class Rent</option>
+                    <option value="Conference Rent">Conference Rent</option>
+                    <option value="Workspace Rent">Workspace Rent</option>
+                </select>
+                
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <label for="customer_name">Customer Name:</label>
+                    <select name="customer_name" id="customer_name" required style="width: 100%;" onchange="checkCustomerType()">';
+                
+// Fetch customers from the database as before
+if (!empty($customers)) {
+    foreach ($customers as $customer) {
+        echo '<option value="' . esc_attr($customer->customer_name) . '" data-type="' . esc_attr($customer->customer_type) . '">' . esc_html($customer->customer_name) . '</option>';
     }
+} else {
+    echo '<option value="">No customers found</option>';
+}
 
-    echo '</select>
+echo '</select>
 
-                        <label for="booking_type">Booking Type:</label>
-                        <select name="booking_type" id="booking_type" required style="width: 100%;">
-                            <option value="Class Rent">Class Rent</option>
-                            <option value="Conference Rent">Conference Rent</option>
-                            <option value="Workspace Rent">Workspace Rent</option>
-                        </select>
+                    <!-- Start and End Date Selectors, initially hidden -->
+                    <div id="teacherDateSelectors" style="display: none;">
+                        <label for="start_date">Start Date:</label>
+                        <input type="date" name="start_date" id="start_date" style="width: 100%;" required>
                         
-                        <label>Available Time Slots:</label>
-                        <div id="availableSlots" style="margin-bottom: 10px;"></div>
+                        <label for="end_date">End Date:</label>
+                        <input type="date" name="end_date" id="end_date" style="width: 100%;" required>
+                    </div>
+                    
+                    <label>Available Time Slots:</label>
+                    <div id="availableSlots" style="margin-bottom: 10px;"></div>
 
-                        <div style="display: flex; justify-content: space-between; gap: 10px;">
-                            <div style="flex: 1;">
-                                <label for="start_time">Start Time:</label>
-                                <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;">
-                            </div>
-                            <div style="flex: 1;">
-                                <label for="end_time">End Time:</label>
-                                <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;">
-                            </div>
+                    <div style="display: flex; justify-content: space-between; gap: 10px;">
+                        <div style="flex: 1;">
+                            <label for="start_time">Start Time:</label>
+                            <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;">
                         </div>
-                        <div style="display: flex; justify-content: space-between; gap: 10px;">
-    <div style="flex: 1;">
-        <label for="start_date">Start Date:</label>
-        <input type="date" name="start_date" id="start_date" required style="width: 100%;" readonly>
-    </div>
-    <div style="flex: 1;">
-        <label for="end_date">End Date(s):</label>
-        <input type="date" id="end_date" style="width: 100%;">
-        <button type="button" onclick="addEndDate()">Add Date</button>
-    </div>
-</div>
-
-<!-- Display Selected End Dates -->
-<div id="selectedDatesContainer" style="margin-top: 10px;">
-    <label>Selected End Dates:</label>
-    <ul id="selectedDatesList"></ul>
-</div>
-
-                        
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
-                            <input type="submit" value="Save Booking" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">
-                            <button type="button" onclick="closeBookingModal()" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">Close</button>
+                        <div style="flex: 1;">
+                            <label for="end_time">End Time:</label>
+                            <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;">
                         </div>
                     </div>
-                </form>
-            </div>
-        </div>';
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                        <input type="submit" value="Save Booking" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">
+                        <button type="button" onclick="closeBookingModal()" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">Close</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>';
+
+// Add JavaScript to handle customer type change
+echo '<script>
+    function checkCustomerType() {
+    var customerSelect = document.getElementById("customer_name");
+    var selectedCustomer = customerSelect.options[customerSelect.selectedIndex];
+    var customerType = selectedCustomer.getAttribute("data-type");
+
+    // Show the start and end date selectors for all customer types
+    var teacherDateSelectors = document.getElementById("teacherDateSelectors");
+    teacherDateSelectors.style.display = "block"; // Show for all customers
+
+    // Get the start and end date elements
+    var startDate = document.getElementById("start_date");
+    var endDate = document.getElementById("end_date");
+
+    if (customerType === "workspace" || customerType === "conference") {
+        // Set end date to the same as the selected start date for workspace and conference
+        if (startDate && endDate) {
+            endDate.value = startDate.value;
+        }
+    } else if (customerType === "teacher") {
+        // For teachers, end date should not be set automatically
+        // Ensure the end date input is empty (if required)
+        if (endDate) {
+            endDate.value = ""; // Clear the end date, as it should be selected manually
+        }
+    }
+}
+
+
+</script>';
+
 
 }
 
 // JavaScript for booking modal handling
-function booking_calendar_modal_js() {
+function booking_calendar_modal_js() { 
     ?>
     <script type="text/javascript">
+        // Function to show the booking modal
         function showBookingModal(date, availableSlots) {
-    document.getElementById("bookingDate").value = date;
+            console.log("showBookingModal() called", date, availableSlots); // Debugging
 
-    // Set the start date as the clicked date
-    document.getElementById("start_date").value = date;
+            document.getElementById("bookingDate").value = date;
+            document.getElementById("start_date").value = date;
 
-    // Allow multiple date selections for the end date
-    document.getElementById("end_date").value = ""; // Clear previous selections
+            // Update available slots inside the modal with checkboxes
+            let slotsContainer = document.getElementById("availableSlots");
+            if (slotsContainer) {
+                slotsContainer.innerHTML = ""; // Clear previous slots
 
-    // Update available slots inside the modal with checkboxes
-    let slotsContainer = document.getElementById("availableSlots");
-    if (slotsContainer) {
-        slotsContainer.innerHTML = ""; // Clear previous slots
+                if (availableSlots) {
+                    let slotsArray = availableSlots.split(",");
+                    slotsArray.forEach(slot => {
+                        let slotElement = document.createElement("div");
+                        slotElement.style.margin = "5px 0";
 
-        if (availableSlots) {
-            let slotsArray = availableSlots.split(",");
-            slotsArray.forEach(slot => {
-                let slotElement = document.createElement("div");
-                slotElement.style.margin = "5px 0";
+                        let checkbox = document.createElement("input");
+                        checkbox.type = "checkbox";
+                        checkbox.name = "selected_slots[]";
+                        checkbox.value = slot;
+                        checkbox.addEventListener('change', updateStartEndTime); // Ensure event listener
 
-                let checkbox = document.createElement("input");
-                checkbox.type = "checkbox";
-                checkbox.name = "selected_slots[]";
-                checkbox.value = slot;
-                checkbox.addEventListener('change', function() {
-                    updateStartEndTime(); // Update the start and end times when checkbox is toggled
-                });
-                slotElement.appendChild(checkbox);
+                        slotElement.appendChild(checkbox);
 
-                let label = document.createElement("label");
-                label.textContent = slot;
-                slotElement.appendChild(label);
+                        let label = document.createElement("label");
+                        label.textContent = slot;
+                        slotElement.appendChild(label);
 
-                slotsContainer.appendChild(slotElement);
-            });
-        } else {
-            slotsContainer.innerHTML = "<p>No available slots</p>";
+                        slotsContainer.appendChild(slotElement);
+                    });
+                } else {
+                    slotsContainer.innerHTML = "<p>No available slots</p>";
+                }
+            }
+
+            document.getElementById("bookingModal").style.display = "block";
         }
-    }
 
-    document.getElementById("bookingModal").style.display = "block";
-}
-let selectedEndDates = [];
+        // Function to update start_time and end_time based on selected slots
+        function updateStartEndTime() {
+            console.log("updateStartEndTime() triggered");
 
-function addEndDate() {
-    let endDateInput = document.getElementById("end_date");
-    let selectedDate = endDateInput.value;
+            let selectedSlots = [];
+            let checkboxes = document.querySelectorAll('input[name="selected_slots[]"]:checked');
 
-    if (selectedDate && !selectedEndDates.includes(selectedDate)) {
-        selectedEndDates.push(selectedDate);
-        updateSelectedDatesDisplay();
-    }
-}
+            checkboxes.forEach(checkbox => {
+                console.log("Selected Slot:", checkbox.value); // Debugging
+                selectedSlots.push(checkbox.value);
+            });
 
-// Function to update displayed selected dates
-function updateSelectedDatesDisplay() {
-    let selectedDatesList = document.getElementById("selectedDatesList");
-    selectedDatesList.innerHTML = ""; // Clear previous list
+            if (selectedSlots.length > 0) {
+                let firstSlot = selectedSlots[0].split(' - ');
+                let lastSlot = selectedSlots[selectedSlots.length - 1].split(' - ');
 
-    selectedEndDates.forEach(date => {
-        let listItem = document.createElement("li");
-        listItem.textContent = date;
-        
-        // Add remove button for each date
-        let removeButton = document.createElement("button");
-        removeButton.textContent = "Remove";
-        removeButton.style.marginLeft = "10px";
-        removeButton.onclick = function () {
-            selectedEndDates = selectedEndDates.filter(d => d !== date);
-            updateSelectedDatesDisplay();
-        };
+                console.log("Start Time:", firstSlot[0]);
+                console.log("End Time:", lastSlot[1]);
 
-        listItem.appendChild(removeButton);
-        selectedDatesList.appendChild(listItem);
-    });
-}
-
-
-// Function to update start_time and end_time based on selected slots
-function updateStartEndTime() {
-    let selectedSlots = [];
-    let checkboxes = document.querySelectorAll('input[name="selected_slots[]"]:checked');
-    checkboxes.forEach(checkbox => {
-        selectedSlots.push(checkbox.value);
-    });
-
-    if (selectedSlots.length > 0) {
-        // Set the start time and end time based on the selected slots
-        let firstSlot = selectedSlots[0].split(' - ');
-        let lastSlot = selectedSlots[selectedSlots.length - 1].split(' - ');
-
-        document.getElementById("start_time").value = firstSlot[0];  // Start time
-        document.getElementById("end_time").value = lastSlot[1];    // End time
-    } else {
-        // If no slots are selected, reset the time fields
-        document.getElementById("start_time").value = '';
-        document.getElementById("end_time").value = '';
-    }
-}
-
+                document.getElementById("start_time").value = firstSlot[0]; 
+                document.getElementById("end_time").value = lastSlot[1]; 
+            } else {
+                console.log("No slots selected, resetting fields.");
+                document.getElementById("start_time").value = '';
+                document.getElementById("end_time").value = '';
+            }
+        }
 
         function closeBookingModal() {
             document.getElementById('bookingModal').style.display = 'none';
         }
+
+        // Ensure checkboxes work even if dynamically created
+        document.addEventListener("DOMContentLoaded", function () {
+            document.addEventListener("change", function (event) {
+                if (event.target.matches('input[name="selected_slots[]"]')) {
+                    updateStartEndTime();
+                }
+            });
+        });
 
         jQuery(document).ready(function ($) {
             $('#bookingForm').submit(function (e) {
@@ -837,6 +1062,7 @@ function updateStartEndTime() {
     <?php
 }
 add_action('admin_footer', 'booking_calendar_modal_js');
+
 
 
 
