@@ -1,6 +1,6 @@
 <?php   
 /**
- * Plugin Name: 
+ * Plugin Name:
  * Description: 
  * Version: 1.0
  * Author: makerspace
@@ -51,6 +51,7 @@ function booking_calendar_install() {
         customer_name VARCHAR(255) NOT NULL,
         customer_email VARCHAR(255) NOT NULL,
         customer_phone VARCHAR(20) NOT NULL,
+        customer_image TEXT;
         date_registered TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id)
     ) $charset_collate;";
@@ -215,13 +216,38 @@ function customer_registration_page() {
         .customer-table th {
             background-color: #f4f4f4;
         }
+    /* Optional: Style the overlay button */
+    #image-upload-overlay {
+        font-size: 30px;
+        color: white;
+        padding: 10px;
+        border-radius: 50%;
+        cursor: pointer;
+    }
 </style>
 
 <div class="wrap"> 
     <div class="customer-form-container">
         <h2>Customer Registration</h2>
-        <form method="post" id="customer-registration-form">
+        <form method="post" id="customer-registration-form" enctype="multipart/form-data">
             <table class="form-table">
+                <tr>
+                    <th><label for="customer_image">Customer Image</label></th>
+                    <td>
+                        <!-- Image preview container with "+" button overlay -->
+                        <div id="image-preview-container" style="position: relative; display: inline-block;">
+                            <!-- Sample black and white image -->
+                            <img id="image-preview" src="https://designhouse.lk/wp-content/uploads/2025/03/sample.png" alt="Sample Image" style="max-width: 150px; display: block; padding: 5px;">
+                            <!-- Overlay with '+' button -->
+                            <div id="image-upload-overlay" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 30px; color: black; padding: 10px; border-radius: 50%; cursor: pointer;">
+                                +
+                            </div>
+                            <!-- Hidden file input that gets triggered by the overlay click -->
+                            <input type="file" name="customer_image" id="customer_image" accept="image/*" onchange="previewImage(event)" style="display: none;">
+                        </div>
+                    </td>
+                </tr>
+
                 <tr>
                     <th><label for="customer_type">Customer Type</label></th>
                     <td>
@@ -250,7 +276,30 @@ function customer_registration_page() {
         </form>
     </div>
 </div>
+<script>
+    // Trigger file input when the "+" button is clicked
+    document.getElementById('image-upload-overlay').addEventListener('click', function() {
+        document.getElementById('customer_image').click();
+    });
 
+    function previewImage(event) {
+        var file = event.target.files[0];
+        var reader = new FileReader();
+
+        reader.onload = function(e) {
+            var preview = document.getElementById('image-preview');
+            var placeholder = document.getElementById('image-preview-placeholder');
+
+            preview.style.display = 'block';
+            preview.src = e.target.result;
+            placeholder.style.display = 'none';
+        };
+
+        if (file) {
+            reader.readAsDataURL(file);
+        }
+    }
+</script>
        
             
                         <!-- Popup Modal -->
@@ -297,11 +346,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_customer'])) 
     $customer_phone = sanitize_text_field($_POST['customer_phone']);
     $customer_type  = sanitize_text_field($_POST['customer_type']);
 
+    $image_url = '';
+
+    if (!empty($_FILES['customer_image']['name'])) {
+        require_once(ABSPATH . 'wp-admin/includes/file.php');
+        require_once(ABSPATH . 'wp-admin/includes/image.php');
+
+        $uploaded = media_handle_upload('customer_image', 0);
+
+        if (!is_wp_error($uploaded)) {
+            $image_url = wp_get_attachment_url($uploaded);
+        }
+    }
+
     $wpdb->insert($table_name, [
         'customer_name'  => $customer_name,
         'customer_email' => $customer_email,
         'customer_phone' => $customer_phone,
-        'customer_type'  => $customer_type
+        'customer_type'  => $customer_type,
+        'customer_image' => $image_url
     ]);
 
 
@@ -318,36 +381,48 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $customer_phone = sanitize_text_field($_POST['customer_phone']);
     $customer_type  = sanitize_text_field($_POST['customer_type']);
 
+    $image_url = '';
+    if (!empty($_FILES['customer_image']['name'])) {
+        require_once(ABSPATH . 'wp-admin/includes/file.php');
+        require_once(ABSPATH . 'wp-admin/includes/image.php');
+
+        $uploaded = media_handle_upload('customer_image', 0);
+        if (!is_wp_error($uploaded)) {
+            $image_url = wp_get_attachment_url($uploaded);
+        }
+    }
+
     $wpdb->insert($table_name, [
         'customer_name'  => $customer_name,
         'customer_email' => $customer_email,
         'customer_phone' => $customer_phone,
-        'customer_type'  => $customer_type
+        'customer_type'  => $customer_type,
+        'customer_image' => $image_url,
     ]);
-     // Prepare the email content
-     $subject = "Welcome to Our Service";
-     $message = "
-     Hello $customer_name,
-     
-     Thank you for registering with us. We are excited to have you as a $customer_type.
-     
-     If you have any questions or need assistance, feel free to contact us.
-     
-     Best Regards,
-     Makerspace Team
-     ";
-     
-     // Set email headers to ensure it comes from your company's email
-     $headers = [
-         'From: Your Company Name <no-reply@makerspace.lk>',
-         'Content-Type: text/html; charset=UTF-8'
-     ];
-     
-     // Send the email
-     wp_mail($customer_email, $subject, nl2br($message), $headers);
 
-    echo "<div class='updated'><p>Customer Registered Successfully!</p></div>";
+    // Send welcome email
+    $subject = "Welcome to Our Service";
+    $message = "
+    Hello $customer_name,
+    
+    Thank you for registering with us. We are excited to have you as a $customer_type.
+    
+    If you have any questions or need assistance, feel free to contact us.
+    
+    Best Regards,
+    Makerspace Team
+    ";
+
+    $headers = [
+        'From: Your Company Name <no-reply@makerspace.lk>',
+        'Content-Type: text/html; charset=UTF-8'
+    ];
+
+    wp_mail($customer_email, $subject, nl2br($message), $headers);
+
+    exit;
 }
+
 
 }
 function customer_list_page() { 
@@ -378,6 +453,7 @@ function customer_list_page() {
             <table class="wp-list-table widefat fixed striped customers" style="border-collapse: collapse; width: 100%;">
                 <thead>
                     <tr style="border: 1px solid black;">
+                        <th>Image</th>
                         <th style="border: 1px solid black; font-weight: bold; text-align: center;">Customer Type</th>
                         <th style="border: 1px solid black; font-weight: bold; text-align: center;">Customer Name</th>
                         <th style="border: 1px solid black; font-weight: bold; text-align: center;">Email</th>
@@ -391,11 +467,19 @@ function customer_list_page() {
                 <tbody>
                     <?php foreach ($results as $customer): ?>
                         <tr style="border: 1px solid black;">
+                    <td style="text-align: center;">
+    <?php if (!empty($customer->customer_image)): ?>
+        <img src="<?php echo esc_url($customer->customer_image); ?>" alt="Customer Image" width="60">
+    <?php else: ?>
+        No image
+    <?php endif; ?>
+</td>
                             <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->customer_type); ?></td>
                             <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->customer_name); ?></td>
                             <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->customer_email); ?></td>
                             <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->customer_phone); ?></td>
                             <td style="border: 1px solid black; text-align: center;"><?php echo esc_html($customer->date_registered); ?></td>
+
                             <td style="border: 1px solid black; text-align: center;">
                                 <a href="<?php echo admin_url('admin.php?page=customer-edit&customer_id=' . $customer->id); ?>" 
                                 title="Edit" style="text-decoration: none; color: #0073aa;">
@@ -555,9 +639,20 @@ function booking_calendar_page() {
     $view = isset($_GET['view']) ? $_GET['view'] : 'month'; // Default to 'month' view
     $current_month = isset($_GET['month']) ? intval($_GET['month']) : date('m');
     $current_year = isset($_GET['year']) ? intval($_GET['year']) : date('Y');
-    $current_day = isset($_GET['day']) ? intval($_GET['day']) : date('d'); // Get the current day if in 'day' view
-    $week_start = isset($_GET['week_start']) ? $_GET['week_start'] : date('Y-m-d', strtotime('last Monday'));
-    $week_end = isset($_GET['week_end']) ? $_GET['week_end'] : date('Y-m-d', strtotime('last Monday +6 days'));
+$current_day = isset($_GET['day']) ? intval($_GET['day']) : date('d');
+
+// Calculate current week's Monday as start
+$today = date('Y-m-d');
+$day_of_week = date('w'); // 0 (Sunday) to 6 (Saturday)
+$week_start = isset($_GET['week_start']) 
+    ? $_GET['week_start'] 
+    : date('Y-m-d', strtotime($today . ' -' . ($day_of_week == 0 ? 6 : $day_of_week - 1) . ' days'));
+
+// End of the current week is 6 days after the start
+$week_end = isset($_GET['week_end']) 
+    ? $_GET['week_end'] 
+    : date('Y-m-d', strtotime($week_start . ' +6 days'));
+
 
 
     // Calculate the previous and next day correctly using strtotime
@@ -632,7 +727,7 @@ function booking_calendar_page() {
     } elseif ($view == 'week') {
         display_week_view($bookings, $week_start, $week_end);
     } elseif ($view == 'day') {
-        display_day_view($bookings, $current_month, $current_year, $current_day);
+        display_day_view($current_day, $current_month, $current_year);
     } elseif ($view == 'year') {
         display_year_view($bookings, $current_year);
     }
@@ -646,18 +741,18 @@ function booking_calendar_page() {
 
 
 // Handle the booking form submission via AJAX
-function save_booking() { 
+function save_booking() {  
     global $wpdb;
 
     // Get data from the AJAX request
     $customer_name = sanitize_text_field($_POST['customer_name']);
     $start_time = sanitize_text_field($_POST['start_time']);
     $end_time = sanitize_text_field($_POST['end_time']);
-    $start_date = sanitize_text_field($_POST['start_date']); // Start date of the teacher's class
-    $end_date = sanitize_text_field($_POST['end_date']); // End date of the teacher's class
+    $start_date = sanitize_text_field($_POST['start_date']); 
+    $end_date = sanitize_text_field($_POST['end_date']);
     $booking_type = sanitize_text_field($_POST['booking_type']);
 
-    // Convert start and end dates to DateTime objects
+    // Convert dates to DateTime objects
     $start_date = new DateTime($start_date);
     $end_date = new DateTime($end_date);
 
@@ -665,12 +760,29 @@ function save_booking() {
     $color = '#' . strtoupper(dechex(rand(0, 0xFFFFFF)));
 
     // Loop through the weeks, booking the class on the same weekday until the end date
-    $current_date = clone $start_date; // Clone the start date to modify it
+    $current_date = clone $start_date; 
     while ($current_date <= $end_date) {
-        // Format the current date as 'Y-m-d' for the booking
         $booking_date = $current_date->format('Y-m-d');
 
-        // Insert the booking into the database for this date
+        // **Check for existing booking conflict**
+        $existing_booking = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}booking_calendar 
+                 WHERE booking_date = %s 
+                 AND ((start_time >= %s AND start_time < %s) 
+                 OR (end_time > %s AND end_time <= %s) 
+                 OR (start_time <= %s AND end_time >= %s))",
+                $booking_date, $start_time, $end_time, $start_time, $end_time, $start_time, $end_time
+            )
+        );
+
+        if ($existing_booking > 0) {
+            // **Return error message if the time slot is already booked**
+            wp_send_json_error(['message' => 'Time slot is already booked for this date. Please choose another time.']);
+            return;
+        }
+
+        // **Insert booking if no conflicts**
         $wpdb->insert(
             $wpdb->prefix . 'booking_calendar',
             array(
@@ -683,18 +795,14 @@ function save_booking() {
             )
         );
 
-        // Move to the next week (same day of the week)
         $current_date->modify('+1 week');
     }
 
-    // Generate an invoice number
+    // Generate invoice
     $invoice_number = 'INV-' . strtoupper(uniqid());
-
-    // Set an amount based on booking type (Modify as needed)
     $amount = ($booking_type == 'premium') ? 100.00 : 50.00;
-
-    // Save invoice in the database
     $booking_id = $wpdb->insert_id;
+
     $wpdb->insert(
         $wpdb->prefix . 'booking_invoices',
         array(
@@ -704,13 +812,10 @@ function save_booking() {
         )
     );
 
-    // Get invoice ID
     $invoice_id = $wpdb->insert_id;
-
-    // Generate invoice link
     $invoice_url = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
 
-    // Send success response with redirect URL
+    // Send success response
     wp_send_json_success([
         'message' => 'Booking saved successfully!',
         'invoice_url' => $invoice_url
@@ -719,7 +824,11 @@ function save_booking() {
 
 add_action('wp_ajax_save_booking', 'save_booking');
 
-function display_month_view($bookings, $current_month, $current_year) {
+
+function display_month_view($bookings, $current_month, $current_year) {  
+    // Get today's date
+    $current_date = date('Y-m-d');
+
     // Calculate the first day of the month and number of days
     $first_day_of_month = strtotime("{$current_year}-{$current_month}-01");
     $start_day = date('N', $first_day_of_month);  // 1 = Monday, 7 = Sunday
@@ -727,11 +836,7 @@ function display_month_view($bookings, $current_month, $current_year) {
 
     // Query the database to get existing bookings
     global $wpdb;
-    $booked_times = $wpdb->get_results("
-        SELECT booking_date, start_time, end_time 
-        FROM wp_booking_calendar 
-        WHERE YEAR(booking_date) = {$current_year} AND MONTH(booking_date) = {$current_month}
-    ");
+    $booked_times = $wpdb->get_results("SELECT booking_date, start_time, end_time FROM wp_booking_calendar WHERE YEAR(booking_date) = {$current_year} AND MONTH(booking_date) = {$current_month}");
 
     // Create a structure to store booked times by date
     $booked_times_by_date = [];
@@ -741,7 +846,12 @@ function display_month_view($bookings, $current_month, $current_year) {
             'end_time' => $booking->end_time
         ];
     }
-
+    // Create a structure to store customer images by customer name
+    $customer_images = [];
+    $customers = $wpdb->get_results("SELECT customer_name, customer_image FROM wp_booking_customers");
+    foreach ($customers as $customer) {
+        $customer_images[$customer->customer_name] = $customer->customer_image;
+    }
     echo '<table class="booking-table" border="1" cellspacing="0" cellpadding="5" style="width:100%; text-align:center; border-collapse: collapse; table-layout: fixed;"> 
             <thead>
                 <tr>
@@ -771,12 +881,36 @@ function display_month_view($bookings, $current_month, $current_year) {
             $booked_time_str = '';
             if (!empty($bookings_on_date)) {
                 foreach ($bookings_on_date as $booking) {
-                    $booked_time_str .= '<div style="background-color:' . esc_attr($booking->color) . '; color: white; padding: 5px; margin: 2px 0; border-radius: 4px;">';
-                    $booked_time_str .= esc_html($booking->customer_name) . '<br>' . esc_html($booking->start_time . ' - ' . $booking->end_time);
-                    $booked_time_str .= '<br><small>Type: ' . esc_html($booking->booking_type) . '</small>';  // Added booking type
+                    $icon = '';
+                    if ($booking->booking_type == 'Class Rent') {
+                        $icon = '<span class="dashicons dashicons-welcome-learn-more"></span>';
+                    } elseif ($booking->booking_type == 'Conference Rent') {
+                        $icon = '<span class="dashicons dashicons-groups"></span>';
+                    } elseif ($booking->booking_type == 'Workspace Rent') {
+                        $icon = '<span class="dashicons dashicons-money"></span>';
+                    }
+                
+                    $customer_image_url = isset($customer_images[$booking->customer_name]) ? $customer_images[$booking->customer_name] : '';
+                    $booked_time_str .= '<div style="position: relative; background-color:' . esc_attr($booking->color) . '; color: white; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; position: relative;">';
+                    
+                    // Icon in the top-left corner
+                    $booked_time_str .= '<span style="position: absolute; top: 5px; left: 5px; font-size: 18px;">' . $icon . '</span>';
+                    
+                    // Booking details aligned to the right
+                    $booked_time_str .= '<div style="position: absolute; top: 2px; right: 5px;">';
+                    if (!empty($customer_image_url)) {
+                        $booked_time_str .= '<img src="' . esc_url($customer_image_url) . '" alt="Customer Image" style="width: 30px; height: 30px; border-radius: 50%;"> ';
+                    }
                     $booked_time_str .= '</div>';
+                    $booked_time_str .= '<br>';
+                    $booked_time_str .= esc_html($booking->customer_name) . '<br>' . esc_html(date('H:i', strtotime($booking->start_time)) . ' - ' . date('H:i', strtotime($booking->end_time)));
+                    $booked_time_str .= '<br><small>Type: ' . esc_html($booking->booking_type) . '</small>';
+                    $booked_time_str .= '</div></div>';
                 }
             }
+
+            // Highlight today's date with a red border
+            $highlight_border = ($current_cell_date == $current_date) ? 'border: 3px solid red;' : 'border: 1px solid #000;';
 
             // Fetch booked times for the current date
             $booked_times_on_date = isset($booked_times_by_date[$current_cell_date]) ? $booked_times_by_date[$current_cell_date] : [];
@@ -810,38 +944,42 @@ function display_month_view($bookings, $current_month, $current_year) {
 
             // Only show the available slots if there are bookings for the day
             if (($row == 1 && $day >= $start_day) || ($row > 1 && $current_day <= $num_days)) {
-                if (!empty($bookings_on_date)) {
-                    // Assuming that $booking->id is available as the unique identifier for each booking
-echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
-                    style="border: 1px solid #000; height: 100px; vertical-align: top; width: 14.28%; 
-                    text-align: right; padding: 5px;" 
-                    onclick="showBookingModal(\'' . $current_cell_date . '\', \'' . implode(',', $available_slots) . '\')">' . 
-                    $current_day . $booked_time_str . '</td>';
-
-                } else {
-                    // If there are no bookings, just display the date with any existing bookings
+                // Only display the modal if the date is not in the past
+                $onclick_event = '';
+                if ($current_cell_date >= $current_date) {
+                    if (!empty($bookings_on_date)) {
+                        // Assuming that $booking->id is available as the unique identifier for each booking
+                        $onclick_event = "onclick=\"showBookingModal('{$current_cell_date}', '" . implode(',', $available_slots) . "')\"";
+                    } else {
+                        $onclick_event = "onclick=\"showBookingModal('{$current_cell_date}', '')\"";
+                    }
                     echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
-                    style="border: 1px solid #000; height: 100px; vertical-align: top; width: 14.28%; text-align: right; padding: 5px;" 
-                    onclick="showBookingModal(\'' . $current_cell_date . '\', \'\')">' . $current_day . $booked_time_str . '</td>';
+                        style="' . $highlight_border . ' height: 100px; vertical-align: top; width: 14.28%; 
+                        text-align: right; padding: 5px;" ' . $onclick_event . '>' . $current_day . $booked_time_str . '</td>';
+                } else {
+                    // For past dates, we don't add the onclick event and don't change any visual style.
+                    echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
+                        style="' . $highlight_border . ' height: 100px; vertical-align: top; width: 14.28%; 
+                        text-align: right; padding: 5px;">' . $current_day . $booked_time_str . '</td>';
                 }
                 $current_day++;
             } else {
                 // Handle previous month's dates
                 if ($current_day <= 1 && $day < $start_day) {
                     echo '<td class="booking-slot" data-day="' . $day . '" style="border: 1px solid #000; height: 100px; 
-                          vertical-align: top; width: 14.28%; text-align: right; padding: 5px; background-color: #f0f0f0; color: #aaa;">
-                          ' . $previous_month_day . '</td>';
+                        vertical-align: top; width: 14.28%; text-align: right; padding: 5px; background-color: #f0f0f0; color: #aaa;">
+                        ' . $previous_month_day . '</td>';
                     $previous_month_day++;
                 }
                 // Handle next month's dates
                 elseif ($current_day > $num_days) {
                     echo '<td class="booking-slot" data-day="' . $day . '" style="border: 1px solid #000; height: 100px; 
-                          vertical-align: top; width: 14.28%; text-align: right; padding: 5px; background-color: #f0f0f0; color: #aaa;">
-                          ' . $next_month_days . '</td>';
+                        vertical-align: top; width: 14.28%; text-align: right; padding: 5px; background-color: #f0f0f0; color: #aaa;">
+                        ' . $next_month_days . '</td>';
                     $next_month_days++;
                 } else {
                     echo '<td class="booking-slot" data-day="' . $day . '" style="border: 1px solid #000; height: 100px; 
-                          vertical-align: top; width: 14.28%;"></td>';
+                        vertical-align: top; width: 14.28%;"></td>';
                 }
             }
         }
@@ -854,6 +992,8 @@ echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_c
 
     echo '    </tbody>
             </table>';
+
+
 
     // Add booking modal HTML
 // Add booking modal HTML
@@ -869,12 +1009,15 @@ echo '<div id="bookingModal" class="modal" style="display:none; position: fixed;
             <form id="bookingForm">
                 <input type="hidden" name="booking_date" id="bookingDate">
                 
-                <label for="booking_type">Booking Type:</label>
-                <select name="booking_type" id="booking_type" required style="width: 100%;">
-                    <option value="Class Rent">Class Rent</option>
-                    <option value="Conference Rent">Conference Rent</option>
-                    <option value="Workspace Rent">Workspace Rent</option>
-                </select>
+             <label for="booking_type">Booking Type:</label>
+             <select name="booking_type" id="booking_type" required style="width: 100%;" onchange="checkBookingType()">
+                 <option value="" disabled selected>Select Booking Type</option>
+                 <option value="Class Rent">Class Rent</option>
+                 <option value="Conference Rent">Conference Rent</option>
+                 <option value="Workspace Rent">Workspace Rent</option>
+             </select>
+
+
                 
                 <div style="display: flex; flex-direction: column; gap: 10px;">
                     <label for="customer_name">Customer Name:</label>
@@ -894,7 +1037,8 @@ echo '</select>
                     <!-- Start and End Date Selectors, initially hidden -->
                     <div id="teacherDateSelectors" style="display: none;">
                         <label for="start_date">Start Date:</label>
-                        <input type="date" name="start_date" id="start_date" style="width: 100%;" required>
+                        
+                        <input type="date" name="start_date" id="start_date" style="width: 100%;" required readonly>
                         
                         <label for="end_date">End Date:</label>
                         <input type="date" name="end_date" id="end_date" style="width: 100%;" required>
@@ -925,32 +1069,33 @@ echo '</select>
 
 // Add JavaScript to handle customer type change
 echo '<script>
-    function checkCustomerType() {
-    var customerSelect = document.getElementById("customer_name");
-    var selectedCustomer = customerSelect.options[customerSelect.selectedIndex];
-    var customerType = selectedCustomer.getAttribute("data-type");
+    function checkBookingType() { 
+    var bookingSelect = document.getElementById("booking_type");
+    var bookingType = bookingSelect.value; // Get selected booking type
 
-    // Show the start and end date selectors for all customer types
+    // Show the start and end date selectors for all booking types
     var teacherDateSelectors = document.getElementById("teacherDateSelectors");
-    teacherDateSelectors.style.display = "block"; // Show for all customers
+    teacherDateSelectors.style.display = "block"; // Show for all bookings
 
     // Get the start and end date elements
     var startDate = document.getElementById("start_date");
     var endDate = document.getElementById("end_date");
 
-    if (customerType === "workspace" || customerType === "conference") {
+    if (bookingType === "Workspace Rent" || bookingType === "Conference Rent") {
         // Set end date to the same as the selected start date for workspace and conference
         if (startDate && endDate) {
             endDate.value = startDate.value;
+            endDate.setAttribute("readonly", true);
         }
-    } else if (customerType === "teacher") {
-        // For teachers, end date should not be set automatically
-        // Ensure the end date input is empty (if required)
+    } else if (bookingType === "Class Rent") {
+        // For class rent, end date should not be set automatically
         if (endDate) {
+            endDate.removeAttribute("readonly");
             endDate.value = ""; // Clear the end date, as it should be selected manually
         }
     }
 }
+
 
 
 </script>';
@@ -963,72 +1108,108 @@ function booking_calendar_modal_js() {
     ?>
     <script type="text/javascript">
         // Function to show the booking modal
-        function showBookingModal(date, availableSlots) {
-            console.log("showBookingModal() called", date, availableSlots); // Debugging
+function showBookingModal(date, availableSlots) {
+    var currentDate = new Date().toISOString().split('T')[0]; // Get the current date in 'YYYY-MM-DD' format
+    
+    // Prevent opening the modal for past dates
+    if (date < currentDate) {
+        alert("Cannot book for past dates.");
+        return;
+    }
 
-            document.getElementById("bookingDate").value = date;
-            document.getElementById("start_date").value = date;
+    console.log("showBookingModal() called", date, availableSlots); // Debugging
 
-            // Update available slots inside the modal with checkboxes
-            let slotsContainer = document.getElementById("availableSlots");
-            if (slotsContainer) {
-                slotsContainer.innerHTML = ""; // Clear previous slots
+    document.getElementById("bookingDate").value = date;
+    document.getElementById("start_date").value = date;
 
-                if (availableSlots) {
-                    let slotsArray = availableSlots.split(",");
-                    slotsArray.forEach(slot => {
-                        let slotElement = document.createElement("div");
-                        slotElement.style.margin = "5px 0";
+    // Get the available slots container and label
+    let slotsContainer = document.getElementById("availableSlots");
+    let slotsLabel = slotsContainer.previousElementSibling; // Assuming label is right before the div
 
-                        let checkbox = document.createElement("input");
-                        checkbox.type = "checkbox";
-                        checkbox.name = "selected_slots[]";
-                        checkbox.value = slot;
-                        checkbox.addEventListener('change', updateStartEndTime); // Ensure event listener
+    if (slotsContainer) {
+        slotsContainer.innerHTML = ""; // Clear previous slots
 
-                        slotElement.appendChild(checkbox);
+        if (availableSlots && availableSlots.trim() !== "") {
+            let slotsArray = availableSlots.split(",");
+            slotsArray.forEach(slot => {
+                let slotElement = document.createElement("div");
+                slotElement.style.margin = "5px 0";
 
-                        let label = document.createElement("label");
-                        label.textContent = slot;
-                        slotElement.appendChild(label);
+                let checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.name = "selected_slots[]";
+                checkbox.value = slot;
+                checkbox.addEventListener('change', updateStartEndTime); // Ensure event listener
 
-                        slotsContainer.appendChild(slotElement);
-                    });
-                } else {
-                    slotsContainer.innerHTML = "<p>No available slots</p>";
-                }
-            }
+                slotElement.appendChild(checkbox);
 
-            document.getElementById("bookingModal").style.display = "block";
-        }
+                let label = document.createElement("label");
+                label.textContent = slot;
+                slotElement.appendChild(label);
 
-        // Function to update start_time and end_time based on selected slots
-        function updateStartEndTime() {
-            console.log("updateStartEndTime() triggered");
-
-            let selectedSlots = [];
-            let checkboxes = document.querySelectorAll('input[name="selected_slots[]"]:checked');
-
-            checkboxes.forEach(checkbox => {
-                console.log("Selected Slot:", checkbox.value); // Debugging
-                selectedSlots.push(checkbox.value);
+                slotsContainer.appendChild(slotElement);
             });
 
-            if (selectedSlots.length > 0) {
-                let firstSlot = selectedSlots[0].split(' - ');
-                let lastSlot = selectedSlots[selectedSlots.length - 1].split(' - ');
-
-                console.log("Start Time:", firstSlot[0]);
-                console.log("End Time:", lastSlot[1]);
-
-                document.getElementById("start_time").value = firstSlot[0]; 
-                document.getElementById("end_time").value = lastSlot[1]; 
-            } else {
-                console.log("No slots selected, resetting fields.");
-                document.getElementById("start_time").value = '';
-                document.getElementById("end_time").value = '';
-            }
+            // Show label only if slots exist
+            slotsLabel.style.display = "block"; 
+            slotsContainer.style.display = "block";
+        } else {
+            slotsLabel.style.display = "none"; 
+            slotsContainer.style.display = "none";
         }
+    }
+
+    document.getElementById("bookingModal").style.display = "block";
+}
+
+
+
+        // Function to update start_time and end_time based on selected slots
+function updateStartEndTime() {
+    console.log("updateStartEndTime() triggered");
+
+    // Get all slot checkboxes
+    let allCheckboxes = Array.from(document.querySelectorAll('input[name="selected_slots[]"]'));
+    let checkedIndexes = allCheckboxes
+        .map((cb, idx) => cb.checked ? idx : -1)
+        .filter(idx => idx !== -1);
+
+    // If at least two checkboxes are selected, fill the gap
+    if (checkedIndexes.length >= 2) {
+        let minIndex = Math.min(...checkedIndexes);
+        let maxIndex = Math.max(...checkedIndexes);
+
+        // Automatically check all in-between checkboxes
+        for (let i = minIndex; i <= maxIndex; i++) {
+            allCheckboxes[i].checked = true;
+        }
+    }
+
+    // Now update start and end time as usual
+    let selectedSlots = [];
+    allCheckboxes.forEach(checkbox => {
+        if (checkbox.checked) {
+            console.log("Selected Slot:", checkbox.value);
+            selectedSlots.push(checkbox.value);
+        }
+    });
+
+    if (selectedSlots.length > 0) {
+        let firstSlot = selectedSlots[0].split(' - ');
+        let lastSlot = selectedSlots[selectedSlots.length - 1].split(' - ');
+
+        console.log("Start Time:", firstSlot[0]);
+        console.log("End Time:", lastSlot[1]);
+
+        document.getElementById("start_time").value = firstSlot[0];
+        document.getElementById("end_time").value = lastSlot[1];
+    } else {
+        console.log("No slots selected, resetting fields.");
+        document.getElementById("start_time").value = '';
+        document.getElementById("end_time").value = '';
+    }
+}
+
 
         function closeBookingModal() {
             document.getElementById('bookingModal').style.display = 'none';
@@ -1053,7 +1234,7 @@ function booking_calendar_modal_js() {
                     if (response.success) {
                         window.location.href = response.data.invoice_url;
                     } else {
-                        alert('Booking failed. Please try again.');
+                        alert('Time slot is already booked for this date. Please choose available time slots.');
                     }
                 });
             });
@@ -1082,6 +1263,9 @@ function generateCustomerColor($customer_name) {
 }
 
 function display_week_view($bookings, $week_start, $week_end) {
+    // Get today's date
+    $today = date('Y-m-d');  // Today's date in Y-m-d format
+    
     // Filter bookings for the current week
     $filtered_bookings = array_filter($bookings, function ($booking) use ($week_start, $week_end) {
         return ($booking->booking_date >= $week_start && $booking->booking_date <= $week_end);
@@ -1096,7 +1280,11 @@ function display_week_view($bookings, $week_start, $week_end) {
     for ($i = 0; $i < 7; $i++) {
         $day = date('l', strtotime("+$i day", strtotime($week_start)));  // Day of the week (Monday, Tuesday, etc.)
         $date = date('n/j', strtotime("+$i day", strtotime($week_start))); // Date in the format Month/Day (2/24, 2/25, etc.)
-        echo "<th>$day<br>$date</th>";  // Display day and date
+        
+        // Check if this is today's day and highlight it
+        $highlight_day = (date('Y-m-d', strtotime("+$i day", strtotime($week_start))) == $today) ? 'color: red; font-weight: bold;' : '';
+        
+        echo "<th style='$highlight_day'>$day<br>$date</th>";  // Display day and date with highlighted day if it's today
     }
 
     echo '    </tr>
@@ -1104,75 +1292,74 @@ function display_week_view($bookings, $week_start, $week_end) {
             <tbody>';
 
     // Generate time slots from 7:00 AM to 7:00 PM (7 to 19 in 24-hour format)
-for ($hour = 7; $hour <= 19; $hour++) {
-    // Format hour as 07.00, 08.00, etc.
-    $formatted_hour = sprintf("%02d.00", $hour);
-    echo '<tr>';
-    echo '<td style="border: 1px solid #000; font-weight: bold;">' . $formatted_hour . '</td>'; // Time column with formatted time
+    for ($hour = 7; $hour <= 19; $hour++) {
+        // Format hour as 07.00, 08.00, etc.
+        $formatted_hour = sprintf("%02d.00", $hour);
+        echo '<tr>';
+        echo '<td style="border: 1px solid #000; font-weight: bold;">' . $formatted_hour . '</td>'; // Time column with formatted time
 
-    // Fill in the week days with bookings
-    for ($i = 0; $i < 7; $i++) {
-        $current_date = date('Y-m-d', strtotime("+$i day", strtotime($week_start)));
-        $cell_style = 'border: 1px solid #000; height: 50px; vertical-align: middle; text-align: center; position: relative;';
-        $booking_info = "";
-        $background = "";
+        // Fill in the week days with bookings
+        for ($i = 0; $i < 7; $i++) {
+            $current_date = date('Y-m-d', strtotime("+$i day", strtotime($week_start)));
+            $cell_style = 'border: 1px solid #000; height: 50px; vertical-align: middle; text-align: center; position: relative;';
+            $booking_info = "";
+            $background = "";
 
-        foreach ($filtered_bookings as $booking) {
-            if ($booking->booking_date == $current_date) {
-                $start_time = strtotime($booking->start_time);
-                $end_time = strtotime($booking->end_time);
-                $slot_start = strtotime("$hour:00");
-                $slot_end = strtotime("$hour:59");
+            foreach ($filtered_bookings as $booking) {
+                if ($booking->booking_date == $current_date) {
+                    $start_time = strtotime($booking->start_time);
+                    $end_time = strtotime($booking->end_time);
+                    $slot_start = strtotime("$hour:00");
+                    $slot_end = strtotime("$hour:59");
 
-                // If booking starts or ends in this hour slot
-                if ($slot_start <= $end_time && $slot_end >= $start_time) {
-                    $top_fill = 0;
-                    $bottom_fill = 100;
+                    // If booking starts or ends in this hour slot
+                    if ($slot_start <= $end_time && $slot_end >= $start_time) {
+                        $top_fill = 0;
+                        $bottom_fill = 100;
 
-                    // Adjust for half-hour start (color bottom 50% if start time is half-hour)
-                    if ($start_time > $slot_start && $start_time <= strtotime("$hour:30")) {
-                        $top_fill = 50;  // This fills the bottom 50% of the current hour cell
-                    } elseif ($start_time > strtotime("$hour:30") && $start_time < $slot_end) {
-                        $top_fill = 0;  // No fill in the first half of the hour
+                        // Adjust for half-hour start (color bottom 50% if start time is half-hour)
+                        if ($start_time > $slot_start && $start_time <= strtotime("$hour:30")) {
+                            $top_fill = 50;  // This fills the bottom 50% of the current hour cell
+                        } elseif ($start_time > strtotime("$hour:30") && $start_time < $slot_end) {
+                            $top_fill = 0;  // No fill in the first half of the hour
+                        }
+
+                        // Adjust for half-hour end (color top 50% if end time is half-hour)
+                        if ($end_time >= strtotime("$hour:00") && $end_time <= strtotime("$hour:30")) {
+                            $bottom_fill = 100; // Color the top 50% for half-hour end
+                        } elseif ($end_time > strtotime("$hour:30") && $end_time <= $slot_end) {
+                            $bottom_fill = 50; // Color the whole cell for the rest of the hour
+                        }
+
+                        // Special case for bookings ending at the very end of an hour (e.g., 6:00 PM)
+                        if ($end_time == $slot_end) {
+                            $bottom_fill = 100; // Ensure the full cell is colored if the end time matches the slot's end
+                        }
+
+                        // Generate a color for the customer
+                        $customer_color = generateCustomerColor($booking->customer_name);
+
+                        // Gradient fill for partial bookings
+                        $background = "background: linear-gradient(to bottom, $customer_color {$top_fill}%, $customer_color {$bottom_fill}%, white {$bottom_fill}%); color: white; font-weight: bold;";
+
+                        // Prepare the booking info to display (removes seconds)
+                        $booking_info = esc_html($booking->customer_name);
                     }
-
-                    // Adjust for half-hour end (color top 50% if end time is half-hour)
-                    if ($end_time >= strtotime("$hour:00") && $end_time <= strtotime("$hour:30")) {
-                        $bottom_fill = 100; // Color the top 50% for half-hour end
-                    } elseif ($end_time > strtotime("$hour:30") && $end_time <= $slot_end) {
-                        $bottom_fill = 50; // Color the whole cell for the rest of the hour
-                    }
-
-                    // Special case for bookings ending at the very end of an hour (e.g., 6:00 PM)
-                    if ($end_time == $slot_end) {
-                        $bottom_fill = 100; // Ensure the full cell is colored if the end time matches the slot's end
-                    }
-
-                    // Generate a color for the customer
-                    $customer_color = generateCustomerColor($booking->customer_name);
-
-                    // Gradient fill for partial bookings
-                    $background = "background: linear-gradient(to bottom, $customer_color {$top_fill}%, $customer_color {$bottom_fill}%, white {$bottom_fill}%); color: white; font-weight: bold;";
-
-                    // Prepare the booking info to display
-                    $booking_info = esc_html($booking->customer_name) . '<br>' . esc_html($booking->start_time . ' - ' . $booking->end_time);
                 }
+            }
+
+            // Display the booking info with the background color and customer name for all relevant cells
+            if (!empty($booking_info)) {
+                echo '<td data-date="' . $current_date . '" style="' . $cell_style . $background . '">';
+                echo '<div style="padding: 5px;">' . $booking_info . '</div>';
+                echo '</td>';
+            } else {
+                echo '<td data-date="' . $current_date . '" style="' . $cell_style . '"></td>';
             }
         }
 
-        // Display the booking info with the background color and customer name for all relevant cells
-        if (!empty($booking_info)) {
-            echo '<td data-date="' . $current_date . '" style="' . $cell_style . $background . '">';
-            echo '<div style="padding: 5px;">' . $booking_info . '</div>';
-            echo '</td>';
-        } else {
-            echo '<td data-date="' . $current_date . '" style="' . $cell_style . '"></td>';
-        }
+        echo '</tr>';
     }
-
-    echo '</tr>';
-}
-
 
     echo '    </tbody>
           </table>';
@@ -1183,49 +1370,106 @@ for ($hour = 7; $hour <= 19; $hour++) {
 
 
 
+function display_day_view($day, $month, $year) {
+    global $wpdb;
+
+    $selected_date = date('Y-m-d', mktime(0, 0, 0, $month, $day, $year));
+
+    // Fetch only bookings for this specific day
+    $bookings = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT * FROM {$wpdb->prefix}booking_calendar 
+             WHERE booking_date = %s ORDER BY start_time",
+            $selected_date
+        )
+    );
+
+    //echo '<h2 style="margin-top: 20px;">Day View – ' . date('F j, Y', strtotime($selected_date)) . '</h2>';
+
+    // Time range (8AM to 7PM)
+    $start_hour = 8;
+    $end_hour = 19;
+    $total_hours = $end_hour - $start_hour;
+
+    echo '<div style="display: flex; border: 1px solid #ccc; height: ' . (($end_hour - $start_hour) * 65) . 'px; overflow-y: auto; position: relative; font-family: Arial, sans-serif;">';
 
 
+    // Time labels
+    echo '<div style="width: 80px; background-color: #f9f9f9; border-right: 1px solid #ccc;">';
+    for ($hour = $start_hour; $hour <= $end_hour; $hour++) {
+        $time_label = date('g A', mktime($hour, 0));
+        echo '<div style="height: 50px; padding: 5px; font-size: 12px; text-align: right; color: #666;">' . $time_label . '</div>';
+    }
+    echo '</div>';
 
+    // Booking slots container
+    echo '<div style="flex-grow: 1; position: relative;">';
 
+    // Grid background
+    for ($hour = $start_hour; $hour <= $end_hour; $hour++) {
+        echo '<div style="height: 50px; border-bottom: 1px solid #eee;"></div>';
+    }
 
+    // Place bookings
+    foreach ($bookings as $booking) {
+        $start = DateTime::createFromFormat('H:i:s', $booking->start_time);
+        $end = DateTime::createFromFormat('H:i:s', $booking->end_time);
 
-function display_day_view($bookings, $current_month, $current_year, $current_day) {
-    // Calculate current date based on the selected month, year, and day
-    $current_date = mktime(0, 0, 0, $current_month, $current_day, $current_year);
-    $formatted_date = date('F j, Y', $current_date); // Display the date as "Month Day, Year"
+        $start_minutes = ($start->format('H') * 60) + $start->format('i');
+        $end_minutes = ($end->format('H') * 60) + $end->format('i');
+        $day_start_minutes = $start_hour * 60;
 
-    //// Display the current day
-    //echo "<h3>Day View " . $formatted_date . "</h3>";
-//
-    //// Display relevant booked slots for the current date in a table
-    //echo "<h4>Booked Slots for " . $formatted_date . "</h4>";
-
-    // Filter the bookings for the current date
-    $relevant_bookings = array_filter($bookings, function ($booking) use ($current_date) {
-        return $booking->booking_date == date('Y-m-d', $current_date);  // Filter bookings that match the current date
-    });
-
-    // If there are no bookings
-    if (empty($relevant_bookings)) {
-        echo "<p>No bookings for today.</p>";
-    } else {
-        // Start the table
-        echo "<table border='1' cellspacing='0' cellpadding='10' style='width:100%; border-collapse: collapse;'>";
-        echo "<thead><tr><th>Customer Name</th><th>Start Time</th><th>End Time</th></tr></thead>";
-        echo "<tbody>";
-
-        // Loop through each booking and display its details
-        foreach ($relevant_bookings as $booking) {
-            echo "<tr>";
-            echo "<td>" . esc_html($booking->customer_name) . "</td>";
-            echo "<td>" . esc_html($booking->start_time) . "</td>";
-            echo "<td>" . esc_html($booking->end_time) . "</td>";
-            echo "</tr>";
+        // Ensure booking is within display window
+        if ($start_minutes >= ($end_hour * 60 + 60) || $end_minutes <= ($start_hour * 60)) {
+            continue;
         }
 
-        echo "</tbody></table>";
+        $hour_height = 60; // Use the actual row height
+
+        $start_minutes = ($start->format('H') * 60) + $start->format('i');
+        $end_minutes = ($end->format('H') * 60) + $end->format('i');
+        $day_start_minutes = $start_hour * 60;
+        
+        // Clamp to visible range
+        $start_minutes = max($start_minutes, $day_start_minutes);
+        $end_minutes = min($end_minutes, $end_hour * 60); 
+        
+        // Correct top position
+        $top = (($start_minutes - $day_start_minutes) / 60) * $hour_height;
+        
+        // Correct height
+        $height = max(20, (($end_minutes - $start_minutes) / 60) * $hour_height);
+
+
+        // Reduced width for booking area (you can change the `width` here)
+        $booking_width = 'calc(10% - 20px)'; // Adjust width, or specify a fixed width like '200px'
+
+        echo '<div style="
+            position: absolute;
+            top: ' . $top . 'px;
+            left: 10px; /* Left padding */
+            width: ' . $booking_width . ';
+            height: ' . $height . 'px;
+            background-color: ' . esc_attr($booking->color) . ';
+            color: #fff;
+            padding: 8px;
+            border-radius: 5px;
+            font-size: 13px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;">
+                <strong>' . esc_html($booking->customer_name) . '</strong><br>
+                <small>' . esc_html(date('g:i A', strtotime($booking->start_time))) . ' - ' . esc_html(date('g:i A', strtotime($booking->end_time))) . '</small><br>
+                <span style="font-size: 12px;">' . esc_html(ucfirst($booking->booking_type)) . '</span>
+            </div>';
     }
+
+    echo '</div>'; // Grid
+    echo '</div>'; // Outer container
 }
+
+
+
+
 
 
 function display_year_view($bookings, $current_year) {
