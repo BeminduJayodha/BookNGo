@@ -1,12 +1,5 @@
 <?php   
-/**
- * Plugin Name:
- * Description: 
- * Version: 1.0
- * Author: makerspace
- */
 
-// Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -453,7 +446,7 @@ function customer_list_page() {
             <table class="wp-list-table widefat fixed striped customers" style="border-collapse: collapse; width: 100%;">
                 <thead>
                     <tr style="border: 1px solid black;">
-                        <th>Image</th>
+                        <th style= "border: 1px solid black; font-weight: bold; text-align: center;">Image</th>
                         <th style="border: 1px solid black; font-weight: bold; text-align: center;">Customer Type</th>
                         <th style="border: 1px solid black; font-weight: bold; text-align: center;">Customer Name</th>
                         <th style="border: 1px solid black; font-weight: bold; text-align: center;">Email</th>
@@ -484,12 +477,13 @@ function customer_list_page() {
                                 <a href="<?php echo admin_url('admin.php?page=customer-edit&customer_id=' . $customer->id); ?>" 
                                 title="Edit" style="text-decoration: none; color: #0073aa;">
                                 <span class="dashicons dashicons-edit"></span>
-                                </a> |
-                                <a href="<?php echo admin_url('admin.php?page=customer-list&delete_customer=' . $customer->id); ?>" 
+                                </a> 
+                                <?php /*<a href="<?php echo admin_url('admin.php?page=customer-list&delete_customer=' . $customer->id); ?>" 
                                    onclick="return confirm('Are you sure you want to delete this customer?');" 
                                    title="Delete" style="text-decoration: none; color: #0073aa;">
-                                   <span class="dashicons dashicons-trash"></span>
+                                <span class="dashicons dashicons-trash"></span>
                                 </a>
+                                */ ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -668,6 +662,32 @@ $week_end = isset($_GET['week_end'])
     // Calculate previous and next year
     $previous_year = $current_year - 1;
     $next_year = $current_year + 1;
+    // Output inline CSS to style the active button
+echo '<style>
+    .button {
+        font-size: 16px;
+        padding: 6px 12px;
+        text-decoration: none;
+        border: 1px solid #ffffff;
+        background-color: white;
+        color: #333;
+        border-radius: 4px;
+        margin-left: 10px;
+        cursor: pointer;
+    }
+
+    .button:hover {
+        background-color: #04a8ff !important;
+        color: white !important;; /* Ensure text color changes on hover */
+    }
+
+    .button.active {
+        background-color: #04a8ff !important;
+        color: white !important;
+        font-weight: bold;
+    }
+</style>';
+
 
     echo '<div class="wrap">
             <h1>Booking Calendar</h1>
@@ -675,48 +695,71 @@ $week_end = isset($_GET['week_end'])
                 <div class="calendar-navigation-section" style="display: flex; justify-content: space-between; align-items: center;">';
 
     // Show navigation buttons
+    echo '<div style="display: flex; align-items: center; justify-content: center; flex-grow: 1;">';
+    
     if ($view == 'day') {
-        // Day navigation buttons
-        echo '<a href="?page=booking-calendar&view=day&day=' . date('d', strtotime($previous_day)) . '&month=' . date('m', strtotime($previous_day)) . '&year=' . date('Y', strtotime($previous_day)) . '" class="button">&#8249; Previous Day</a>
-              <a href="?page=booking-calendar&view=day&day=' . date('d', strtotime($next_day)) . '&month=' . date('m', strtotime($next_day)) . '&year=' . date('Y', strtotime($next_day)) . '" class="button">Next Day &#8250;</a>';
+        echo '<a href="?page=booking-calendar&view=day&day=' . date('d', strtotime($previous_day)) . '&month=' . date('m', strtotime($previous_day)) . '&year=' . date('Y', strtotime($previous_day)) . '" class="button" title="Previous Day"><strong style="font-size: 15px;">&#8249;</strong></a>';
+        echo '<span style="margin: 0 15px; font-size: 18px; font-weight: bold;">' . date('F j, Y', mktime(0, 0, 0, $current_month, $current_day, $current_year)) . '</span>';
+        echo '<a href="?page=booking-calendar&view=day&day=' . date('d', strtotime($next_day)) . '&month=' . date('m', strtotime($next_day)) . '&year=' . date('Y', strtotime($next_day)) . '" class="button" title="Next Day"><strong style="font-size: 15px;">&#8250;</strong></a>';
+    
     } elseif ($view == 'week') {
-        // Week navigation buttons
-        echo '<a href="?page=booking-calendar&view=week&week_start=' . $previous_week_start . '&week_end=' . $previous_week_end . '" class="button">&#8249; Previous Week</a>
-              <a href="?page=booking-calendar&view=week&week_start=' . $next_week_start . '&week_end=' . $next_week_end . '" class="button">Next Week &#8250;</a>';
+        echo '<a href="?page=booking-calendar&view=week&week_start=' . $previous_week_start . '&week_end=' . $previous_week_end . '" class="button" title="Previous Week"><strong style="font-size: 15px;">&#8249;</strong></a>';
+        echo '<span style="margin: 0 15px; font-size: 18px; font-weight: bold;">Week of ' . date('F j, Y', strtotime($week_start)) . ' - ' . date('F j, Y', strtotime($week_end)) . '</span>';
+        echo '<a href="?page=booking-calendar&view=week&week_start=' . $next_week_start . '&week_end=' . $next_week_end . '" class="button" title="Next Week"><strong style="font-size: 15px;">&#8250;</strong></a>';
+    
     } elseif ($view == 'year') {
-        // Year navigation buttons
-        echo '<a href="?page=booking-calendar&view=year&year=' . $previous_year . '" class="button">&#8249; Previous Year</a>
-              <a href="?page=booking-calendar&view=year&year=' . $next_year . '" class="button">Next Year &#8250;</a>';
+        echo '<a href="?page=booking-calendar&view=year&year=' . $previous_year . '" class="button" title="Previous Year"><strong style="font-size: 15px;">&#8249;</strong></a>';
+        echo '<span style="margin: 0 15px; font-size: 18px; font-weight: bold;">' . $current_year . '</span>';
+        echo '<a href="?page=booking-calendar&view=year&year=' . $next_year . '" class="button" title="Next Year"><strong style="font-size: 15px;">&#8250;</strong></a>';
+    
     } else {
-        // Month navigation buttons
-        echo '<a href="?page=booking-calendar&month=' . ($current_month - 1) . '&year=' . $current_year . '" class="button">&#8249; Previous</a>
-              <a href="?page=booking-calendar&month=' . ($current_month + 1) . '&year=' . $current_year . '" class="button">Next &#8250;</a>';
+        // Wrap-around month fix
+        $previous_month = $current_month - 1;
+        $next_month = $current_month + 1;
+        $prev_month_year = $current_year;
+        $next_month_year = $current_year;
+    
+        if ($previous_month < 1) {
+            $previous_month = 12;
+            $prev_month_year--;
+        }
+        if ($next_month > 12) {
+            $next_month = 1;
+            $next_month_year++;
+        }
+    
+        echo '<a href="?page=booking-calendar&month=' . $previous_month . '&year=' . $prev_month_year . '" class="button" title="Previous Month"><strong style="font-size: 15px;">&#8249;</strong></a>';
+        echo '<span style="margin: 0 15px; font-size: 18px; font-weight: bold;">' . date('F Y', mktime(0, 0, 0, $current_month, 1, $current_year)) . '</span>';
+        echo '<a href="?page=booking-calendar&month=' . $next_month . '&year=' . $next_month_year . '" class="button" title="Next Month"><strong style="font-size: 15px;">&#8250;</strong></a>';
     }
+    
+    echo '</div>';
+
 
     // Display the correct date header based on the selected view
-    echo '<span style="font-size: 18px; font-weight: bold; margin: 0 15px; text-align: center; flex-grow: 1;">';
-
-    if ($view == 'month') {
-        // For month view, show month and year
-        echo date('F Y', mktime(0, 0, 0, $current_month, 1, $current_year));
-    } elseif ($view == 'week') {
-        // For week view, show the week range (start to end)
-        echo "Week of " . date('F j, Y', strtotime($week_start)) . " - " . date('F j, Y', strtotime($week_end));
-    } elseif ($view == 'day') {
-        // For day view, show the current day (day, month, year)
-        echo date('F j, Y', mktime(0, 0, 0, $current_month, $current_day, $current_year));
-    } elseif ($view == 'year') {
-        // For year view, show the current year
-        echo $current_year;
-    }
-
-    echo '</span>';
+    //echo '<span style="font-size: 18px; font-weight: bold; margin: 0 15px; text-align: center; flex-grow: 1;">';
+//
+    //if ($view == 'month') {
+    //    // For month view, show month and year
+    //    echo date('F Y', mktime(0, 0, 0, $current_month, 1, $current_year));
+    //} elseif ($view == 'week') {
+    //    // For week view, show the week range (start to end)
+    //    echo "Week of " . date('F j, Y', strtotime($week_start)) . " - " . date('F j, Y', strtotime($week_end));
+    //} elseif ($view == 'day') {
+    //    // For day view, show the current day (day, month, year)
+    //    echo date('F j, Y', mktime(0, 0, 0, $current_month, $current_day, $current_year));
+    //} elseif ($view == 'year') {
+    //    // For year view, show the current year
+    //    echo $current_year;
+    //}
+//
+    //echo '</span>';
 
     // Navigation buttons for view change
-    echo '<a href="?page=booking-calendar&view=month&month=' . $current_month . '&year=' . $current_year . '" class="button" style="margin-left: 10px;">Month</a>
-          <a href="?page=booking-calendar&view=week&week_start=' . $week_start . '&week_end=' . $week_end . '" class="button" style="margin-left: 10px;">Week</a>
-          <a href="?page=booking-calendar&view=day&month=' . $current_month . '&year=' . $current_year . '" class="button" style="margin-left: 10px;">Day</a>
-          <a href="?page=booking-calendar&view=year&month=' . $current_month . '&year=' . $current_year . '" class="button" style="margin-left: 10px;">Year</a>
+    echo '<a href="?page=booking-calendar&view=month&month=' . $current_month . '&year=' . $current_year . '" class="button ' . ($view == 'month' ? 'active' : '') . '" style="margin-left: 10px;">Month</a>
+          <a href="?page=booking-calendar&view=week&week_start=' . $week_start . '&week_end=' . $week_end . '" class="button ' . ($view == 'week' ? 'active' : '') . '" style="margin-left: 10px;">Week</a>
+          <a href="?page=booking-calendar&view=day&month=' . $current_month . '&year=' . $current_year . '" class="button ' . ($view == 'day' ? 'active' : '') . '" style="margin-left: 10px;">Day</a>
+          <a href="?page=booking-calendar&view=year&month=' . $current_month . '&year=' . $current_year . '" class="button ' . ($view == 'year' ? 'active' : '') . '" style="margin-left: 10px;">Year</a>
       </div>
   </div>';
 
@@ -735,6 +778,9 @@ $week_end = isset($_GET['week_end'])
 
     echo '</div>';
 }
+
+
+
 
 
 
@@ -905,12 +951,13 @@ function display_month_view($bookings, $current_month, $current_year) {
                     $booked_time_str .= '<br>';
                     $booked_time_str .= esc_html($booking->customer_name) . '<br>' . esc_html(date('H:i', strtotime($booking->start_time)) . ' - ' . date('H:i', strtotime($booking->end_time)));
                     $booked_time_str .= '<br><small>Type: ' . esc_html($booking->booking_type) . '</small>';
+                
                     $booked_time_str .= '</div></div>';
                 }
             }
 
             // Highlight today's date with a red border
-            $highlight_border = ($current_cell_date == $current_date) ? 'border: 3px solid red;' : 'border: 1px solid #000;';
+            $highlight_border = ($current_cell_date == $current_date) ? 'border: 3px solid #49d200;' : 'border: 1px solid #000;';
 
             // Fetch booked times for the current date
             $booked_times_on_date = isset($booked_times_by_date[$current_cell_date]) ? $booked_times_by_date[$current_cell_date] : [];
@@ -921,26 +968,36 @@ function display_month_view($bookings, $current_month, $current_year) {
             $slot_end_time = strtotime('19:00');
 
             // Generate available slots by checking against booked times only if the day has bookings
-            if (!empty($booked_times_on_date)) {
-                for ($i = $slot_start_time; $i < $slot_end_time; $i += 3600) {
-                    $start_time = date('H:i', $i);
-                    $end_time = date('H:i', $i + 3600);
-                    $is_available = true;
+           
+if (!empty($booked_times_on_date)) {
+    for ($i = $slot_start_time; $i < $slot_end_time; $i += 3600) {
+        $start_time = date('H:i', $i);
+        $end_time = date('H:i', $i + 3600);
+        $is_available = true;
 
-                    // Check if the slot is already booked
-                    foreach ($booked_times_on_date as $booked_time) {
-                        if (($start_time >= $booked_time['start_time'] && $start_time < $booked_time['end_time']) ||
-                            ($end_time > $booked_time['start_time'] && $end_time <= $booked_time['end_time'])) {
-                            $is_available = false;
-                            break;
-                        }
-                    }
+        // Check if the slot is already booked
+        foreach ($booked_times_on_date as $booked_time) {
+            // Convert the booked times to timestamps for comparison
+            $booking_start_time = strtotime($booked_time['start_time']);
+            $booking_end_time = strtotime($booked_time['end_time']);
+            $slot_start_timestamp = strtotime($start_time);
+            $slot_end_timestamp = strtotime($end_time);
 
-                    if ($is_available) {
-                        $available_slots[] = $start_time . ' - ' . $end_time;
-                    }
-                }
+            // If the slot overlaps with the booked time, mark it as unavailable
+            if (($slot_start_timestamp >= $booking_start_time && $slot_start_timestamp < $booking_end_time) ||
+                ($slot_end_timestamp > $booking_start_time && $slot_end_timestamp <= $booking_end_time)) {
+                $is_available = false;
+                break;
             }
+        }
+
+        // Only add available slots
+        if ($is_available) {
+            $available_slots[] = $start_time . ' - ' . $end_time;
+        }
+    }
+}
+
 
             // Only show the available slots if there are bookings for the day
             if (($row == 1 && $day >= $start_day) || ($row > 1 && $current_day <= $num_days)) {
@@ -960,7 +1017,7 @@ function display_month_view($bookings, $current_month, $current_year) {
                     // For past dates, we don't add the onclick event and don't change any visual style.
                     echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
                         style="' . $highlight_border . ' height: 100px; vertical-align: top; width: 14.28%; 
-                        text-align: right; padding: 5px;">' . $current_day . $booked_time_str . '</td>';
+                        text-align: right; padding: 5px;opacity: 0.7;">' . $current_day . $booked_time_str . '</td>';
                 }
                 $current_day++;
             } else {
@@ -1044,8 +1101,11 @@ echo '</select>
                         <input type="date" name="end_date" id="end_date" style="width: 100%;" required>
                     </div>
                     
-                    <label>Available Time Slots:</label>
-                    <div id="availableSlots" style="margin-bottom: 10px;"></div>
+                    <div id="timeSlotContainer" style="display: none;">
+    <label>Available Time Slots:</label>
+    <div id="availableSlots" style="margin-bottom: 10px;"></div>
+</div>
+
 
                     <div style="display: flex; justify-content: space-between; gap: 10px;">
                         <div style="flex: 1;">
@@ -1069,36 +1129,44 @@ echo '</select>
 
 // Add JavaScript to handle customer type change
 echo '<script>
-    function checkBookingType() { 
+function checkBookingType() { 
     var bookingSelect = document.getElementById("booking_type");
-    var bookingType = bookingSelect.value; // Get selected booking type
+    var bookingType = bookingSelect.value;
 
     // Show the start and end date selectors for all booking types
     var teacherDateSelectors = document.getElementById("teacherDateSelectors");
-    teacherDateSelectors.style.display = "block"; // Show for all bookings
+    teacherDateSelectors.style.display = "block";
 
-    // Get the start and end date elements
     var startDate = document.getElementById("start_date");
     var endDate = document.getElementById("end_date");
 
+    // Handle date logic
     if (bookingType === "Workspace Rent" || bookingType === "Conference Rent") {
-        // Set end date to the same as the selected start date for workspace and conference
         if (startDate && endDate) {
             endDate.value = startDate.value;
             endDate.setAttribute("readonly", true);
         }
     } else if (bookingType === "Class Rent") {
-        // For class rent, end date should not be set automatically
         if (endDate) {
             endDate.removeAttribute("readonly");
-            endDate.value = ""; // Clear the end date, as it should be selected manually
+            endDate.value = "";
+        }
+    }
+
+    // Handle time slot visibility
+    var timeSlotContainer = document.getElementById("timeSlotContainer");
+    if (bookingType === "Class Rent") {
+        if (timeSlotContainer) {
+            timeSlotContainer.style.display = "none";
+        }
+    } else {
+        if (timeSlotContainer) {
+            timeSlotContainer.style.display = "block";
         }
     }
 }
-
-
-
 </script>';
+
 
 
 }
@@ -1282,7 +1350,7 @@ function display_week_view($bookings, $week_start, $week_end) {
         $date = date('n/j', strtotime("+$i day", strtotime($week_start))); // Date in the format Month/Day (2/24, 2/25, etc.)
         
         // Check if this is today's day and highlight it
-        $highlight_day = (date('Y-m-d', strtotime("+$i day", strtotime($week_start))) == $today) ? 'color: red; font-weight: bold;' : '';
+        $highlight_day = (date('Y-m-d', strtotime("+$i day", strtotime($week_start))) == $today) ? 'color: #49d200; font-weight: bold;' : '';
         
         echo "<th style='$highlight_day'>$day<br>$date</th>";  // Display day and date with highlighted day if it's today
     }
