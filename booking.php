@@ -1,5 +1,7 @@
 <?php   
 
+
+// Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -1155,21 +1157,124 @@ function checkBookingType() {
 
     // Handle time slot visibility
     var timeSlotContainer = document.getElementById("timeSlotContainer");
-    if (bookingType === "Class Rent") {
-        if (timeSlotContainer) {
-            timeSlotContainer.style.display = "none";
-        }
-    } else {
+    if (bookingType === "Class Rent" || bookingType === "Workspace Rent" || bookingType === "Conference Rent") {
         if (timeSlotContainer) {
             timeSlotContainer.style.display = "block";
         }
+    } else {
+        if (timeSlotContainer) {
+            timeSlotContainer.style.display = "none";
+        }
     }
 }
+
+// When end date is selected, fetch available slots
+document.getElementById("end_date").addEventListener("change", function () {
+    const bookingType = document.getElementById("booking_type").value;
+    const startDate = document.getElementById("start_date").value;
+    const endDate = document.getElementById("end_date").value;
+
+    // Make AJAX request to get available slots only for "Class Rent"
+    if (bookingType === "Class Rent" && startDate && endDate) {
+        fetch(ajaxurl + "?action=get_available_class_slots&start_date=" + startDate + "&end_date=" + endDate)
+            .then(response => response.json())
+            .then(data => {
+                const container = document.getElementById("availableSlots");
+                container.innerHTML = "";
+
+                if (data.length === 0) {
+                    container.innerHTML = "<p>No available slots</p>";
+                    return;
+                }
+
+                data.forEach(week => {
+                    const weekBlock = document.createElement("div");
+                    weekBlock.style.marginBottom = "20px";
+                    weekBlock.innerHTML = "<strong>Week of " + week.date + "</strong><br>" + week.slots.join("<br>");
+                    container.appendChild(weekBlock);
+                });
+            })
+            .catch(error => {
+                console.error("Error fetching slots:", error);
+            });
+    } else {
+        // If the booking type is not Class Rent, ensure no slots are displayed
+        container.innerHTML = "<p>No available slots</p>"; 
+    }
+
+});
+// Listen for changes to the booking type and clear available slots
+document.getElementById("booking_type").addEventListener("change", checkBookingType);
 </script>';
 
-
-
 }
+add_action('wp_ajax_get_available_class_slots', 'get_available_class_slots');
+add_action('wp_ajax_nopriv_get_available_class_slots', 'get_available_class_slots');
+
+function get_available_class_slots() {
+    global $wpdb;
+
+    $start_date = sanitize_text_field($_GET['start_date']);
+    $end_date = sanitize_text_field($_GET['end_date']);
+    
+    // Convert to DateTime objects
+    $start_date_obj = new DateTime($start_date);
+    $end_date_obj = new DateTime($end_date);
+
+    $result = [];
+
+    // Loop through each week between start and end date
+    while ($start_date_obj <= $end_date_obj) {
+        // Get the specific day of the week (e.g., Wednesday) for the class booking
+        $current_day = $start_date_obj->format('Y-m-d');
+        
+        // Get bookings for this date
+        $bookings = $wpdb->get_results($wpdb->prepare(
+            "SELECT start_time, end_time FROM wp_booking_calendar WHERE booking_date = %s", 
+            $current_day
+        ));
+
+        $booked_slots = [];
+        foreach ($bookings as $b) {
+            $booked_slots[] = ['start' => $b->start_time, 'end' => $b->end_time];
+        }
+
+        // Generate available slots for this week
+        $available_slots = [];
+        for ($hour = 8; $hour < 19; $hour++) {  // Assuming you're checking from 8 AM to 7 PM
+            $slot_start = sprintf('%02d:00', $hour);
+            $slot_end = sprintf('%02d:00', $hour + 1);
+
+            $is_conflict = false;
+            foreach ($booked_slots as $bs) {
+                if (
+                    ($slot_start >= $bs['start'] && $slot_start < $bs['end']) ||
+                    ($slot_end > $bs['start'] && $slot_end <= $bs['end']) ||
+                    ($slot_start <= $bs['start'] && $slot_end >= $bs['end'])
+                ) {
+                    $is_conflict = true;
+                    break;
+                }
+            }
+
+            if (!$is_conflict) {
+                $available_slots[] = "$slot_start - $slot_end";
+            }
+        }
+
+        // Add available slots for this week to the result
+        $result[] = [
+            'date' => $current_day,
+            'slots' => $available_slots
+        ];
+
+        // Move to the next week
+        $start_date_obj->modify('+1 week');
+    }
+
+    wp_send_json($result);
+}
+
 
 // JavaScript for booking modal handling
 function booking_calendar_modal_js() { 
