@@ -789,7 +789,7 @@ echo '<style>
 
 
 // Handle the booking form submission via AJAX
-function save_booking() {  
+function save_booking() {   
     global $wpdb;
 
     // Get data from the AJAX request
@@ -801,15 +801,15 @@ function save_booking() {
     $booking_type = sanitize_text_field($_POST['booking_type']);
 
     // Convert dates to DateTime objects
-    $start_date = new DateTime($start_date);
-    $end_date = new DateTime($end_date);
+    $start_date_obj = new DateTime($start_date);
+    $end_date_obj = new DateTime($end_date);
 
     // Generate a random color
     $color = '#' . strtoupper(dechex(rand(0, 0xFFFFFF)));
 
     // Loop through the weeks, booking the class on the same weekday until the end date
-    $current_date = clone $start_date; 
-    while ($current_date <= $end_date) {
+    $current_date = clone $start_date_obj; 
+    while ($current_date <= $end_date_obj) {
         $booking_date = $current_date->format('Y-m-d');
 
         // **Check for existing booking conflict**
@@ -838,6 +838,8 @@ function save_booking() {
                 'start_time' => $start_time,
                 'end_time' => $end_time,
                 'booking_date' => $booking_date,
+                'start_date' => $start_date_obj->format('Y-m-d'),
+                'end_date' => $end_date_obj->format('Y-m-d'),
                 'color' => $color,
                 'booking_type' => $booking_type
             )
@@ -871,6 +873,7 @@ function save_booking() {
 }
 
 add_action('wp_ajax_save_booking', 'save_booking');
+
 
 
 function display_month_view($bookings, $current_month, $current_year) {  
@@ -1154,9 +1157,13 @@ function checkBookingType() {
             endDate.value = "";
         }
     }
+    
 
     // Handle time slot visibility
     var timeSlotContainer = document.getElementById("timeSlotContainer");
+    var availableSlots = document.getElementById("availableSlots");
+    availableSlots.innerHTML = "<p>No available slots</p>";
+     
     if (bookingType === "Class Rent" || bookingType === "Workspace Rent" || bookingType === "Conference Rent") {
         if (timeSlotContainer) {
             timeSlotContainer.style.display = "block";
@@ -1166,6 +1173,7 @@ function checkBookingType() {
             timeSlotContainer.style.display = "none";
         }
     }
+    
 }
 
 // When end date is selected, fetch available slots
@@ -1174,7 +1182,7 @@ document.getElementById("end_date").addEventListener("change", function () {
     const startDate = document.getElementById("start_date").value;
     const endDate = document.getElementById("end_date").value;
 
-    // Make AJAX request to get available slots only for "Class Rent"
+    // Make AJAX request to get available slots for "Class Rent"
     if (bookingType === "Class Rent" && startDate && endDate) {
         fetch(ajaxurl + "?action=get_available_class_slots&start_date=" + startDate + "&end_date=" + endDate)
             .then(response => response.json())
@@ -1197,12 +1205,38 @@ document.getElementById("end_date").addEventListener("change", function () {
             .catch(error => {
                 console.error("Error fetching slots:", error);
             });
-    } else {
-        // If the booking type is not Class Rent, ensure no slots are displayed
-        container.innerHTML = "<p>No available slots</p>"; 
-    }
+    } 
+    // For "Workspace Rent" and "Conference Rent", get available slots without end date
+    else if ((bookingType === "Workspace Rent" || bookingType === "Conference Rent") && startDate) {
+        fetch(ajaxurl + "?action=get_available_workspace_conference_slots&start_date=" + startDate)
+            .then(response => response.json())
+            .then(data => {
+                const container = document.getElementById("availableSlots");
+                container.innerHTML = "";
 
+                if (data.length === 0) {
+                    container.innerHTML = "<p>No available slots</p>";
+                    return;
+                }
+
+                data.forEach(day => {
+                    const dayBlock = document.createElement("div");
+                    dayBlock.style.marginBottom = "20px";
+                    dayBlock.innerHTML = "<strong>Available Slots for " + day.date + "</strong><br>" + day.slots.join("<br>");
+                    container.appendChild(dayBlock);
+                });
+            })
+            .catch(error => {
+                console.error("Error fetching slots:", error);
+            });
+    } 
+    else {
+        // If no valid booking type or date is selected
+        const container = document.getElementById("availableSlots");
+        container.innerHTML = "<p>No available slots</p>";
+    }
 });
+
 // Listen for changes to the booking type and clear available slots
 document.getElementById("booking_type").addEventListener("change", checkBookingType);
 </script>';
@@ -1274,7 +1308,93 @@ function get_available_class_slots() {
 
     wp_send_json($result);
 }
+// Handle available slots for Workspace Rent and Conference Rent
+add_action('wp_ajax_get_available_workspace_conference_slots', 'get_available_workspace_conference_slots');
+add_action('wp_ajax_nopriv_get_available_workspace_conference_slots', 'get_available_workspace_conference_slots');
 
+function get_available_workspace_conference_slots() {
+    global $wpdb;
+
+    $start_date = sanitize_text_field($_GET['start_date']);
+    
+    // Convert to DateTime object
+    $start_date_obj = new DateTime($start_date);
+
+    $result = [];
+
+    // Loop through each day from the start date
+    for ($i = 0; $i < 7; $i++) {  // Get availability for the next 7 days
+        $current_day = $start_date_obj->format('Y-m-d');
+        
+        // Debugging: Log the date we are checking
+        error_log('Checking availability for: ' . $current_day);
+        
+        // Get bookings for this date
+        $bookings = $wpdb->get_results($wpdb->prepare(
+            "SELECT start_time, end_time FROM wp_booking_calendar WHERE booking_date = %s", 
+            $current_day
+        ));
+
+        // Debugging: Log the bookings retrieved for the current day
+        error_log('Bookings found: ' . print_r($bookings, true));
+
+        if (empty($bookings)) {
+            // If no bookings are found, log this as well
+            error_log("No bookings found for: " . $current_day);
+        }
+
+        $booked_slots = [];
+        foreach ($bookings as $b) {
+            $booked_slots[] = ['start' => $b->start_time, 'end' => $b->end_time];
+        }
+
+        // Generate available slots for the day
+        $available_slots = [];
+        for ($hour = 8; $hour < 19; $hour++) {  // Assuming checking from 8 AM to 7 PM
+            $slot_start = sprintf('%02d:00:00', $hour);
+            $slot_end = sprintf('%02d:00:00', $hour + 1);
+
+            $is_conflict = false;
+            foreach ($booked_slots as $bs) {
+                if (
+                    ($slot_start >= $bs['start'] && $slot_start < $bs['end']) ||
+                    ($slot_end > $bs['start'] && $slot_end <= $bs['end']) ||
+                    ($slot_start <= $bs['start'] && $slot_end >= $bs['end'])
+                ) {
+                    $is_conflict = true;
+                    break;
+                }
+            }
+
+            if (!$is_conflict) {
+                $available_slots[] = "$slot_start - $slot_end";
+            }
+        }
+
+        // If there are available slots, add them to the result
+        if (count($available_slots) > 0) {
+            $result[] = [
+                'date' => $current_day,
+                'slots' => $available_slots
+            ];
+        }
+
+        // Move to the next day
+        $start_date_obj->modify('+1 day');
+    }
+
+    // If no available slots were found, return the message
+    if (empty($result)) {
+        error_log("No available slots found for any of the days checked.");
+        $result[] = [
+            'date' => $current_day,
+            'slots' => ["No available slots"]
+        ];
+    }
+
+    // Send the result back as a JSON response
+    wp_send_json($result);
+}
 
 // JavaScript for booking modal handling
 function booking_calendar_modal_js() { 
