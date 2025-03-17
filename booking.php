@@ -1132,7 +1132,6 @@ echo '</select>
         </div>
     </div>';
 
-// Add JavaScript to handle customer type change
 echo '<script>
 function checkBookingType() { 
     var bookingSelect = document.getElementById("booking_type");
@@ -1145,107 +1144,193 @@ function checkBookingType() {
     var startDate = document.getElementById("start_date");
     var endDate = document.getElementById("end_date");
 
-    // Handle date logic
-    if (bookingType === "Workspace Rent" || bookingType === "Conference Rent") {
-        if (startDate && endDate) {
-            endDate.value = startDate.value;
-            endDate.setAttribute("readonly", true);
-        }
-    } else if (bookingType === "Class Rent") {
-        if (endDate) {
-            endDate.removeAttribute("readonly");
-            endDate.value = "";
-        }
-    }
-    
-
     // Handle time slot visibility
     var timeSlotContainer = document.getElementById("timeSlotContainer");
     var availableSlots = document.getElementById("availableSlots");
     availableSlots.innerHTML = "<p>No available slots</p>";
-     
-    if (bookingType === "Class Rent" || bookingType === "Workspace Rent" || bookingType === "Conference Rent") {
+
+    // Handle date and slot visibility based on booking type
+    if (bookingType === "Workspace Rent" || bookingType === "Conference Rent") {
         if (timeSlotContainer) {
             timeSlotContainer.style.display = "block";
+        }
+
+        // Set the end date field to readonly for Workspace Rent and Conference Rent
+        endDate.setAttribute("readonly", "readonly");
+        endDate.value = startDate.value;  // Set the end date to the start date
+
+        // Fetch available slots for the selected start date
+        if (startDate.value) {
+            fetch(ajaxurl + "?action=get_available_workspace_conference_slots&start_date=" + startDate.value)
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById("availableSlots");
+                    container.innerHTML = "";
+
+                    if (data.length === 0) {
+                        container.innerHTML = "<p>No available slots</p>";
+                        return;
+                    }
+
+                    data.forEach(day => {
+                        const dayBlock = document.createElement("div");
+                        dayBlock.style.marginBottom = "20px";
+                        const dayLabel = document.createElement("strong");
+                        dayLabel.innerHTML = "Available Slots for " + day.date;
+                        dayBlock.appendChild(dayLabel);
+
+                        // Create checkboxes for each slot
+                        day.slots.forEach(slot => {
+                            const checkboxContainer = document.createElement("div");
+
+                            const checkbox = document.createElement("input");
+                            checkbox.type = "checkbox";
+                            checkbox.name = "time_slot[]"; // Group checkboxes under the same name
+                            checkbox.value = slot;  // The time slot value
+
+                            const label = document.createElement("label");
+                            label.innerText = slot;
+
+                            checkboxContainer.appendChild(checkbox);
+                            checkboxContainer.appendChild(label);
+                            dayBlock.appendChild(checkboxContainer);
+                            
+                            checkbox.addEventListener("change", updateStartEndTime);
+                        });
+
+                        container.appendChild(dayBlock);
+                    });
+                })
+                .catch(error => {
+                    console.error("Error fetching slots:", error);
+                });
+        }
+    } else if (bookingType === "Class Rent") {
+        if (timeSlotContainer) {
+            timeSlotContainer.style.display = "block";
+        }
+
+        // Remove the readonly attribute for Class Rent
+        endDate.removeAttribute("readonly");
+
+        // Fetch available slots for the selected date range (start_date and end_date)
+        if (startDate.value && endDate.value) {
+            fetch(ajaxurl + "?action=get_available_class_slots&start_date=" + startDate.value + "&end_date=" + endDate.value)
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById("availableSlots");
+                    container.innerHTML = "";
+
+                    if (data.length === 0) {
+                        container.innerHTML = "<p>No available slots</p>";
+                        return;
+                    }
+
+                    data.forEach(week => {
+                        const weekBlock = document.createElement("div");
+                        weekBlock.style.marginBottom = "20px";
+                        const weekLabel = document.createElement("strong");
+                        weekLabel.innerHTML = "Week of " + week.date;
+                        weekBlock.appendChild(weekLabel);
+
+                        // Create checkboxes for each slot
+                        week.slots.forEach(slot => {
+                            const checkboxContainer = document.createElement("div");
+
+                            const checkbox = document.createElement("input");
+                            checkbox.type = "checkbox";
+                            checkbox.name = "time_slot[]"; // Group checkboxes under the same name
+                            checkbox.value = slot;  // The time slot value
+
+                            const label = document.createElement("label");
+                            label.innerText = slot;
+
+                            checkboxContainer.appendChild(checkbox);
+                            checkboxContainer.appendChild(label);
+                            weekBlock.appendChild(checkboxContainer);
+                            
+                            checkbox.addEventListener("change", updateStartEndTime);
+                        });
+
+                        container.appendChild(weekBlock);
+                    });
+                })
+                .catch(error => {
+                    console.error("Error fetching slots:", error);
+                });
         }
     } else {
         if (timeSlotContainer) {
             timeSlotContainer.style.display = "none";
         }
+
+        // Reset the readonly state for other booking types
+        endDate.removeAttribute("readonly");
     }
-    
 }
 
-// When end date is selected, fetch available slots
-document.getElementById("end_date").addEventListener("change", function () {
-    const bookingType = document.getElementById("booking_type").value;
-    const startDate = document.getElementById("start_date").value;
-    const endDate = document.getElementById("end_date").value;
+// Listen for changes to the booking type and update date handling
+document.getElementById("booking_type").addEventListener("change", checkBookingType);
 
-    // Make AJAX request to get available slots for "Class Rent"
-    if (bookingType === "Class Rent" && startDate && endDate) {
-        fetch(ajaxurl + "?action=get_available_class_slots&start_date=" + startDate + "&end_date=" + endDate)
+// Listen for changes to the end date to update class slots dynamically
+document.getElementById("end_date").addEventListener("change", function() {
+    var bookingSelect = document.getElementById("booking_type");
+    var bookingType = bookingSelect.value;
+    var startDate = document.getElementById("start_date");
+    var endDate = document.getElementById("end_date");
+
+    if (bookingType === "Class Rent" && startDate.value && endDate.value) {
+        fetch(ajaxurl + "?action=get_available_class_slots&start_date=" + startDate.value + "&end_date=" + endDate.value)
             .then(response => response.json())
             .then(data => {
                 const container = document.getElementById("availableSlots");
                 container.innerHTML = "";
 
-                if (data.length === 0) {
+                if (data.slots.length === 0) {
                     container.innerHTML = "<p>No available slots</p>";
                     return;
                 }
 
-                data.forEach(week => {
-                    const weekBlock = document.createElement("div");
-                    weekBlock.style.marginBottom = "20px";
-                    weekBlock.innerHTML = "<strong>Week of " + week.date + "</strong><br>" + week.slots.join("<br>");
-                    container.appendChild(weekBlock);
+                const block = document.createElement("div");
+                block.style.marginBottom = "20px";
+                block.innerHTML = "<strong>Common Available Slots</strong><br>";
+
+                // Create checkboxes for each available slot
+                data.slots.forEach(slot => {
+                    const checkboxContainer = document.createElement("div");
+
+                    const checkbox = document.createElement("input");
+                    checkbox.type = "checkbox";
+                    checkbox.name = "time_slot[]";
+                    checkbox.value = slot;
+
+                    const label = document.createElement("label");
+                    label.innerText = slot;
+
+                    checkboxContainer.appendChild(checkbox);
+                    checkboxContainer.appendChild(label);
+                    block.appendChild(checkboxContainer);
                 });
+
+                container.appendChild(block);
             })
             .catch(error => {
                 console.error("Error fetching slots:", error);
             });
-    } 
-    // For "Workspace Rent" and "Conference Rent", get available slots without end date
-    else if ((bookingType === "Workspace Rent" || bookingType === "Conference Rent") && startDate) {
-        fetch(ajaxurl + "?action=get_available_workspace_conference_slots&start_date=" + startDate)
-            .then(response => response.json())
-            .then(data => {
-                const container = document.getElementById("availableSlots");
-                container.innerHTML = "";
-
-                if (data.length === 0) {
-                    container.innerHTML = "<p>No available slots</p>";
-                    return;
-                }
-
-                data.forEach(day => {
-                    const dayBlock = document.createElement("div");
-                    dayBlock.style.marginBottom = "20px";
-                    dayBlock.innerHTML = "<strong>Available Slots for " + day.date + "</strong><br>" + day.slots.join("<br>");
-                    container.appendChild(dayBlock);
-                });
-            })
-            .catch(error => {
-                console.error("Error fetching slots:", error);
-            });
-    } 
-    else {
-        // If no valid booking type or date is selected
-        const container = document.getElementById("availableSlots");
-        container.innerHTML = "<p>No available slots</p>";
     }
 });
-
-// Listen for changes to the booking type and clear available slots
-document.getElementById("booking_type").addEventListener("change", checkBookingType);
 </script>';
+
+
+
+
+
 
 }
 add_action('wp_ajax_get_available_class_slots', 'get_available_class_slots');
 add_action('wp_ajax_nopriv_get_available_class_slots', 'get_available_class_slots');
 
-function get_available_class_slots() {
+function get_available_class_slots() { 
     global $wpdb;
 
     $start_date = sanitize_text_field($_GET['start_date']);
@@ -1255,11 +1340,12 @@ function get_available_class_slots() {
     $start_date_obj = new DateTime($start_date);
     $end_date_obj = new DateTime($end_date);
 
-    $result = [];
+    // Initialize an array to store available slots across all weeks
+    $common_available_slots = [];
+    $first_iteration = true;
 
     // Loop through each week between start and end date
     while ($start_date_obj <= $end_date_obj) {
-        // Get the specific day of the week (e.g., Wednesday) for the class booking
         $current_day = $start_date_obj->format('Y-m-d');
         
         // Get bookings for this date
@@ -1296,18 +1382,25 @@ function get_available_class_slots() {
             }
         }
 
-        // Add available slots for this week to the result
-        $result[] = [
-            'date' => $current_day,
-            'slots' => $available_slots
-        ];
+        // For the first iteration, set the common available slots to the available slots for the first week
+        if ($first_iteration) {
+            $common_available_slots = $available_slots;
+            $first_iteration = false;
+        } else {
+            // For subsequent iterations, find the intersection of available slots with the common available slots
+            $common_available_slots = array_intersect($common_available_slots, $available_slots);
+        }
 
         // Move to the next week
         $start_date_obj->modify('+1 week');
     }
 
-    wp_send_json($result);
+    // Send the common available slots to the frontend
+    wp_send_json([
+        'slots' => $common_available_slots
+    ]);
 }
+
 // Handle available slots for Workspace Rent and Conference Rent
 add_action('wp_ajax_get_available_workspace_conference_slots', 'get_available_workspace_conference_slots');
 add_action('wp_ajax_nopriv_get_available_workspace_conference_slots', 'get_available_workspace_conference_slots');
@@ -1317,84 +1410,66 @@ function get_available_workspace_conference_slots() {
 
     $start_date = sanitize_text_field($_GET['start_date']);
     
+    // Debugging: Log the start date to confirm it's being passed correctly
+    error_log('Start Date: ' . $start_date);
+    
     // Convert to DateTime object
     $start_date_obj = new DateTime($start_date);
 
     $result = [];
 
-    // Loop through each day from the start date
-    for ($i = 0; $i < 7; $i++) {  // Get availability for the next 7 days
-        $current_day = $start_date_obj->format('Y-m-d');
-        
-        // Debugging: Log the date we are checking
-        error_log('Checking availability for: ' . $current_day);
-        
-        // Get bookings for this date
-        $bookings = $wpdb->get_results($wpdb->prepare(
-            "SELECT start_time, end_time FROM wp_booking_calendar WHERE booking_date = %s", 
-            $current_day
-        ));
+    // Check availability for the selected day
+    $current_day = $start_date_obj->format('Y-m-d');
+    
+    // Debugging: Log the current day we are checking
+    error_log('Checking availability for: ' . $current_day);
+    
+    // Get bookings for this date
+    $bookings = $wpdb->get_results($wpdb->prepare(
+        "SELECT start_time, end_time FROM wp_booking_calendar WHERE booking_date = %s", 
+        $current_day
+    ));
 
-        // Debugging: Log the bookings retrieved for the current day
-        error_log('Bookings found: ' . print_r($bookings, true));
-
-        if (empty($bookings)) {
-            // If no bookings are found, log this as well
-            error_log("No bookings found for: " . $current_day);
-        }
-
-        $booked_slots = [];
-        foreach ($bookings as $b) {
-            $booked_slots[] = ['start' => $b->start_time, 'end' => $b->end_time];
-        }
-
-        // Generate available slots for the day
-        $available_slots = [];
-        for ($hour = 8; $hour < 19; $hour++) {  // Assuming checking from 8 AM to 7 PM
-            $slot_start = sprintf('%02d:00:00', $hour);
-            $slot_end = sprintf('%02d:00:00', $hour + 1);
-
-            $is_conflict = false;
-            foreach ($booked_slots as $bs) {
-                if (
-                    ($slot_start >= $bs['start'] && $slot_start < $bs['end']) ||
-                    ($slot_end > $bs['start'] && $slot_end <= $bs['end']) ||
-                    ($slot_start <= $bs['start'] && $slot_end >= $bs['end'])
-                ) {
-                    $is_conflict = true;
-                    break;
-                }
-            }
-
-            if (!$is_conflict) {
-                $available_slots[] = "$slot_start - $slot_end";
-            }
-        }
-
-        // If there are available slots, add them to the result
-        if (count($available_slots) > 0) {
-            $result[] = [
-                'date' => $current_day,
-                'slots' => $available_slots
-            ];
-        }
-
-        // Move to the next day
-        $start_date_obj->modify('+1 day');
+    $booked_slots = [];
+    foreach ($bookings as $b) {
+        $booked_slots[] = ['start' => $b->start_time, 'end' => $b->end_time];
     }
 
-    // If no available slots were found, return the message
-    if (empty($result)) {
-        error_log("No available slots found for any of the days checked.");
+    // Generate available slots for the day
+    $available_slots = [];
+    for ($hour = 8; $hour < 19; $hour++) {  // Assuming checking from 8 AM to 7 PM
+        $slot_start = sprintf('%02d:00:00', $hour);
+        $slot_end = sprintf('%02d:00:00', $hour + 1);
+
+        $is_conflict = false;
+        foreach ($booked_slots as $bs) {
+            if (
+                ($slot_start >= $bs['start'] && $slot_start < $bs['end']) ||
+                ($slot_end > $bs['start'] && $slot_end <= $bs['end']) ||
+                ($slot_start <= $bs['start'] && $slot_end >= $bs['end'])
+            ) {
+                $is_conflict = true;
+                break;
+            }
+        }
+
+        if (!$is_conflict) {
+            $available_slots[] = "$slot_start - $slot_end";
+        }
+    }
+
+    // If there are available slots, add them to the result
+    if (count($available_slots) > 0) {
         $result[] = [
             'date' => $current_day,
-            'slots' => ["No available slots"]
+            'slots' => $available_slots
         ];
     }
 
     // Send the result back as a JSON response
     wp_send_json($result);
 }
+
 
 // JavaScript for booking modal handling
 function booking_calendar_modal_js() { 
@@ -1459,48 +1534,31 @@ function showBookingModal(date, availableSlots) {
 
         // Function to update start_time and end_time based on selected slots
 function updateStartEndTime() {
-    console.log("updateStartEndTime() triggered");
+    // Collect all checked time slot checkboxes
+    const checkedSlots = Array.from(document.querySelectorAll('input[name="time_slot[]"]:checked'));
 
-    // Get all slot checkboxes
-    let allCheckboxes = Array.from(document.querySelectorAll('input[name="selected_slots[]"]'));
-    let checkedIndexes = allCheckboxes
-        .map((cb, idx) => cb.checked ? idx : -1)
-        .filter(idx => idx !== -1);
-
-    // If at least two checkboxes are selected, fill the gap
-    if (checkedIndexes.length >= 2) {
-        let minIndex = Math.min(...checkedIndexes);
-        let maxIndex = Math.max(...checkedIndexes);
-
-        // Automatically check all in-between checkboxes
-        for (let i = minIndex; i <= maxIndex; i++) {
-            allCheckboxes[i].checked = true;
-        }
-    }
-
-    // Now update start and end time as usual
-    let selectedSlots = [];
-    allCheckboxes.forEach(checkbox => {
-        if (checkbox.checked) {
-            console.log("Selected Slot:", checkbox.value);
-            selectedSlots.push(checkbox.value);
-        }
-    });
-
-    if (selectedSlots.length > 0) {
-        let firstSlot = selectedSlots[0].split(' - ');
-        let lastSlot = selectedSlots[selectedSlots.length - 1].split(' - ');
-
-        console.log("Start Time:", firstSlot[0]);
-        console.log("End Time:", lastSlot[1]);
-
-        document.getElementById("start_time").value = firstSlot[0];
-        document.getElementById("end_time").value = lastSlot[1];
-    } else {
-        console.log("No slots selected, resetting fields.");
+    if (checkedSlots.length === 0) {
+        // Clear fields if nothing selected
         document.getElementById("start_time").value = '';
         document.getElementById("end_time").value = '';
+        return;
     }
+
+    // Get slot values like "09:00 - 10:00"
+    const slotTimes = checkedSlots.map(cb => cb.value);
+
+    // Extract start and end times
+    const times = slotTimes.map(slot => {
+        const [start, end] = slot.split(" - ");
+        return { start, end };
+    });
+
+    // Sort by start time
+    times.sort((a, b) => a.start.localeCompare(b.start));
+
+    // Set start_time to earliest start, end_time to latest end
+    document.getElementById("start_time").value = times[0].start;
+    document.getElementById("end_time").value = times[times.length - 1].end;
 }
 
 
