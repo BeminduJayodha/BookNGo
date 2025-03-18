@@ -578,6 +578,13 @@ function add_invoice_page() {
 }
 add_action('admin_menu', 'add_invoice_page');
 
+
+add_action('admin_enqueue_scripts', 'enqueue_jspdf_script');
+function enqueue_jspdf_script() {
+    wp_enqueue_script('jspdf', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', array(), null, true);
+}
+
+
 function display_invoice_page() {
     global $wpdb;
 
@@ -595,7 +602,7 @@ function display_invoice_page() {
                 <tr>
                     <th style="border: 1px solid #ddd;">Invoice Number</th>
                     <th style="border: 1px solid #ddd;">Customer Name</th>
-                    <th style="border: 1px solid #ddd;">Booking Date</th>
+                    <th style="border: 1px solid #ddd;">Booking Date(s)</th>
                     <th style="border: 1px solid #ddd;">Amount</th>
                     <th style="border: 1px solid #ddd;">Actions</th>
                 </tr>
@@ -610,10 +617,205 @@ function display_invoice_page() {
             echo '<tr>';
             echo '<td style="border: 1px solid #ddd;">' . esc_html($invoice->invoice_number) . '</td>';
             echo '<td style="border: 1px solid #ddd;">' . esc_html($booking->customer_name) . '</td>';
-            echo '<td style="border: 1px solid #ddd;">' . esc_html($booking->booking_date) . '</td>';
-            echo '<td style="border: 1px solid #ddd;">$' . esc_html(number_format($invoice->amount, 2)) . '</td>';
+            echo '<td style="border: 1px solid #ddd;">' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
+            echo '<td style="border: 1px solid #ddd;">Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
             echo '<td style="border: 1px solid #ddd;">
-                    <a href="' . admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice->id) . '" class="button">View Invoice</a>
+        
+        <button class="button download-pdf"
+            data-invoice-number="' . esc_attr($invoice->invoice_number) . '"
+            data-customer-name="' . esc_attr($booking->customer_name) . '"
+            data-start-date="' . esc_attr($booking->start_date) . '"
+            data-end-date="' . esc_attr($booking->booking_date) . '"
+            data-booking-type="' . esc_attr($booking->booking_type) . '"
+            data-amount="' . esc_attr(number_format($invoice->amount, 2)) . '">
+            View Invoice
+        </button>
+      </td>';
+
+            echo '</tr>';
+        }
+    }
+
+    echo '</tbody>
+          </table>';
+}
+
+
+add_action('admin_footer', 'add_pdf_download_script');
+function add_pdf_download_script() {
+    ?>
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.download-pdf').forEach(button => {
+            button.addEventListener('click', () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+
+                // Data from button
+                const invoiceNumber = button.dataset.invoiceNumber;
+                const customerName = button.dataset.customerName;
+                const startDate = button.dataset.startDate;
+                const endDate = button.dataset.endDate;
+                const amount = button.dataset.amount;
+                const bookingType = button.dataset.bookingType; // Added booking type
+                const today = new Date().toLocaleDateString();
+
+                // INVOICE Title (Top-right corner)
+                doc.setFontSize(20);
+                doc.setFont("helvetica", "bold");
+                doc.text("INVOICE", 200, 20, { align: "right" });
+
+                // Company Name and Generated Date on same line
+                let y = 30;
+                doc.setFontSize(16);
+                doc.setFont("helvetica", "bold");
+                doc.text("Lankatronics Pvt Ltd", 20, y);
+
+                doc.setFontSize(11);
+                doc.setFont("helvetica", "normal");
+                doc.text("Invoice Date: " + today, 200, y, { align: "right" });
+
+                // Company Address
+                y += 7;
+                doc.text("No. 8, 1/3, Sunethradevi Road,", 20, y);
+                y += 6;
+                doc.text("Kohuwala, Nugegoda, Sri Lanka", 20, y);
+                y += 6;
+                doc.text("Phone: 077 5678 000", 20, y);
+                y += 6;
+                doc.text("Email: info@lankatronics.lk", 20, y);
+
+                // Invoice Number
+                y += 15;
+                doc.setFontSize(12);
+                doc.setFont("helvetica", "normal");
+                doc.text("Invoice Number: #" + invoiceNumber, 20, y);
+
+                // Customer Info
+                y += 12;
+                doc.setFont("helvetica", "bold");
+                doc.text("Customer Information", 20, y);
+                y += 8;
+                doc.setFont("helvetica", "normal");
+                doc.text("Name: " + customerName, 20, y);
+
+                // Booking Details Table
+                y += 15;
+                doc.setFont("helvetica", "bold");
+                doc.text("Booking Details", 20, y);
+
+                y += 8;
+
+                // Table Header
+                const col1X = 20;
+                const col2X = 80;
+                const col3X = 140;
+                const colWidth = 60;
+                doc.setFont("helvetica", "bold");
+
+                // Draw table header with column borders
+                doc.rect(col1X, y - 4, colWidth, 10); // Booking Type
+                doc.rect(col2X, y - 4, colWidth, 10); // Start to End Date
+                doc.rect(col3X, y - 4, colWidth, 10); // Total Amount
+                doc.text("Booking Type", col1X + 2, y);
+                doc.text("Start to End Date", col2X + 2, y);
+                doc.text("Total Amount", col3X + 2, y);
+
+                // No gap: Directly start content from the same Y coordinate after header
+                y += 10; // Move down to start the content row directly below header
+
+                // Table Content (single row example)
+                doc.setFont("helvetica", "normal");
+
+                // Draw row content directly under the header, no gap
+                doc.rect(col1X, y - 4, colWidth, 10); // Booking Type
+                doc.rect(col2X, y - 4, colWidth, 10); // Start to End Date
+                doc.rect(col3X, y - 4, colWidth, 10); // Total Amount
+                doc.text(bookingType, col1X + 2, y);
+                doc.text(startDate + " to " + endDate, col2X + 2, y);
+                doc.text("Rs. " + amount, col3X + 2, y);
+
+                // Draw line after the content row to separate it
+                doc.line(col1X, y + 6, col3X + colWidth, y + 6);
+
+                // Footer
+                y += 15; // Add space for footer content
+                doc.setFontSize(10);
+                doc.text("Thank you for your booking!", 20, y + 5);
+                doc.text("Visit us at: www.lankatronics.lk", 20, y + 10);
+
+                // Save PDF
+                doc.save(`Invoice_${invoiceNumber}.pdf`);
+            });
+        });
+    });
+    </script>
+    <?php
+}
+function add_payment_page() {
+    add_submenu_page(
+        'booking-calendar',        // Parent menu slug (same as 'booking-calendar' or whatever your parent menu is)
+        'View Payment',            // Page title
+        'View Payment',            // Menu title
+        'manage_options',          // Capability required to access this menu
+        'view-payment',            // Slug for the new submenu page
+        'display_payment_page'     // Function that will display the content of the page
+    );
+}
+add_action('admin_menu', 'add_payment_page');
+function display_payment_page() {
+    global $wpdb;
+
+    // Fetch all invoices from the database
+    $invoices = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}booking_invoices");
+
+    // Check if there are any invoices
+    if (empty($invoices)) {
+        echo '<h2>No invoices found.</h2>';
+        return;
+    }
+
+    echo '<h2>Invoice Details</h2>';
+    echo '<table class="wp-list-table widefat fixed striped invoices-table" cellspacing="0" cellpadding="5" style="width:100%; border: 1px solid #ddd; margin-bottom: 20px;">
+            <thead>
+                <tr>
+                    <th style="border: 1px solid #ddd;">Invoice Number</th>
+                    <th style="border: 1px solid #ddd;">Customer Name</th>
+                    <th style="border: 1px solid #ddd;">Booking Date(s)</th>
+                    <th style="border: 1px solid #ddd;">Amount</th>
+                    <th style="border: 1px solid #ddd;">Payment Status</th>
+                    <th style="border: 1px solid #ddd;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>';
+
+    // Loop through the invoices and display each one in a row
+    foreach ($invoices as $invoice) {
+        // Get the associated booking
+        $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
+
+        if ($booking) {
+            echo '<tr>';
+            echo '<td style="border: 1px solid #ddd;">' . esc_html($invoice->invoice_number) . '</td>';
+            echo '<td style="border: 1px solid #ddd;">' . esc_html($booking->customer_name) . '</td>';
+            echo '<td style="border: 1px solid #ddd;">' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
+            echo '<td style="border: 1px solid #ddd;">Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
+
+            // Display the payment status (you can customize this part based on how you store the status)
+            $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending'; // Assuming `payment_status` is a column in the invoice table
+            echo '<td style="border: 1px solid #ddd;">' . $payment_status . '</td>';
+
+            // Add a button for actions (such as downloading PDF)
+            echo '<td style="border: 1px solid #ddd;">
+                    <button class="button download-pdf"
+                        data-invoice-number="' . esc_attr($invoice->invoice_number) . '"
+                        data-customer-name="' . esc_attr($booking->customer_name) . '"
+                        data-start-date="' . esc_attr($booking->start_date) . '"
+                        data-end-date="' . esc_attr($booking->booking_date) . '"
+                        data-booking-type="' . esc_attr($booking->booking_type) . '"
+                        data-amount="' . esc_attr(number_format($invoice->amount, 2)) . '">
+                        View Invoice
+                    </button>
                   </td>';
             echo '</tr>';
         }
@@ -622,6 +824,13 @@ function display_invoice_page() {
     echo '</tbody>
           </table>';
 }
+
+
+
+
+
+
+
 
 
 // Booking calendar page with a structured table layout and navigation
@@ -785,11 +994,14 @@ echo '<style>
 
 
 
+function reset_invoice_counter_on_activation() {
+    update_option('invoice_counter', 1); // Reset the invoice counter to 1
+}
+register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
 
 
-// Handle the booking form submission via AJAX
-function save_booking() {   
+function save_booking() {
     global $wpdb;
 
     // Get data from the AJAX request
@@ -807,12 +1019,13 @@ function save_booking() {
     // Generate a random color
     $color = '#' . strtoupper(dechex(rand(0, 0xFFFFFF)));
 
-    // Loop through the weeks, booking the class on the same weekday until the end date
-    $current_date = clone $start_date_obj; 
+    $booking_dates = []; // Track all the booking dates
+    $current_date = clone $start_date_obj;
+
     while ($current_date <= $end_date_obj) {
         $booking_date = $current_date->format('Y-m-d');
 
-        // **Check for existing booking conflict**
+        // Check for existing booking conflict
         $existing_booking = $wpdb->get_var(
             $wpdb->prepare(
                 "SELECT COUNT(*) FROM {$wpdb->prefix}booking_calendar 
@@ -825,12 +1038,11 @@ function save_booking() {
         );
 
         if ($existing_booking > 0) {
-            // **Return error message if the time slot is already booked**
-            wp_send_json_error(['message' => 'Time slot is already booked for this date. Please choose another time.']);
+            wp_send_json_error(['message' => 'Time slot is already booked for this date: ' . $booking_date]);
             return;
         }
 
-        // **Insert booking if no conflicts**
+        // Insert booking
         $wpdb->insert(
             $wpdb->prefix . 'booking_calendar',
             array(
@@ -845,14 +1057,39 @@ function save_booking() {
             )
         );
 
+        // Collect booking date
+        $booking_dates[] = $booking_date;
+
         $current_date->modify('+1 week');
     }
 
-    // Generate invoice
-    $invoice_number = 'INV-' . strtoupper(uniqid());
-    $amount = ($booking_type == 'premium') ? 100.00 : 50.00;
-    $booking_id = $wpdb->insert_id;
+$booking_id = $wpdb->insert_id;
+$invoice_counter = get_option('invoice_counter', 1); // Default to 1
 
+// Group booking dates by month
+$monthly_bookings = [];
+foreach ($booking_dates as $date) {
+    $month_key = date('Y-m', strtotime($date));
+    if (!isset($monthly_bookings[$month_key])) {
+        $monthly_bookings[$month_key] = [];
+    }
+    $monthly_bookings[$month_key][] = $date;
+}
+
+$invoice_urls = [];
+$all_invoice_numbers = [];
+$total_amount = 0;
+
+foreach ($monthly_bookings as $month => $dates) {
+    $count = count($dates);
+    $amount = $count * 4000;
+    $total_amount += $amount;
+
+    // Generate invoice number
+    $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+    $all_invoice_numbers[] = $invoice_number;
+
+    // Insert invoice
     $wpdb->insert(
         $wpdb->prefix . 'booking_invoices',
         array(
@@ -863,7 +1100,99 @@ function save_booking() {
     );
 
     $invoice_id = $wpdb->insert_id;
+    $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
+
+    $invoice_counter++;
+    // Get customer email from wp_booking_customers table
+    $customer_email = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
+            $customer_name
+        )
+    );
+
+    // Generate invoice URL
+    $invoice_id = $wpdb->insert_id;
     $invoice_url = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
+
+    // Send invoice email to customer
+// Inside the foreach loop, after invoice_url is generated
+
+// Send invoice email to customer (inside the loop)
+if ($customer_email) {
+    $formatted_start = reset($dates); // First date of the month
+    $formatted_end = end($dates);     // Last date of the month
+
+    $subject = 'Your Booking Invoice – ' . date('F Y', strtotime($month));
+    
+    $message = "
+    <html>
+    <head>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background-color: #f4f4f4;
+                padding: 20px;
+            }
+            .email-container {
+                background-color: #ffffff;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            }
+            .email-header {
+                font-size: 24px;
+                color: #333333;
+                margin-bottom: 20px;
+            }
+            .email-body {
+                font-size: 16px;
+                color: #555555;
+                margin-bottom: 20px;
+            }
+            .email-footer {
+                font-size: 14px;
+                color: #777777;
+                text-align: center;
+                margin-top: 20px;
+            }
+            .invoice-link {
+                font-size: 16px;
+                color: #007bff;
+                text-decoration: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class='email-container'>
+            <div class='email-header'>Hi $customer_name,</div>
+            <div class='email-body'>
+                <p>Thank you for your booking.</p>
+                <p><strong>Invoice Number:</strong> $invoice_number</p>
+                <p><strong>Amount:</strong> Rs. $amount</p>
+                <p><strong>Booking Period:</strong> $formatted_start to $formatted_end</p>
+                <p>You can view your invoice by clicking the link below:</p>
+                <p><a href='$invoice_url' class='invoice-link'>View Your Invoice</a></p>
+            </div>
+            <div class='email-footer'>
+                <p>Best regards,<br>Makerspace Team</p>
+            </div>
+        </div>
+    </body>
+    </html>";
+
+    $headers = array('Content-Type: text/html; charset=UTF-8');
+    wp_mail($customer_email, $subject, $message, $headers);
+}
+
+}
+
+// Update the invoice counter in options
+update_option('invoice_counter', $invoice_counter);
+
+
+
+
 
     // Send success response
     wp_send_json_success([
@@ -873,6 +1202,8 @@ function save_booking() {
 }
 
 add_action('wp_ajax_save_booking', 'save_booking');
+
+
 
 
 
@@ -942,7 +1273,10 @@ function display_month_view($bookings, $current_month, $current_year) {
                     }
                 
                     $customer_image_url = isset($customer_images[$booking->customer_name]) ? $customer_images[$booking->customer_name] : '';
-                    $booked_time_str .= '<div style="position: relative; background-color:' . esc_attr($booking->color) . '; color: white; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; position: relative;">';
+                    $booked_text_color = ($current_cell_date < $current_date) ? '#f0f0f1' : 'white'; // Gray for past, white for future/today
+
+                    $booked_time_str .= '<div style="position: relative; background-color:' . esc_attr($booking->color) . '; color: ' . $booked_text_color . '; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center;">';
+
                     
                     // Icon in the top-left corner
                     $booked_time_str .= '<span style="position: absolute; top: 5px; left: 5px; font-size: 18px;">' . $icon . '</span>';
@@ -1019,10 +1353,10 @@ if (!empty($booked_times_on_date)) {
                         style="' . $highlight_border . ' height: 100px; vertical-align: top; width: 14.28%; 
                         text-align: right; padding: 5px;" ' . $onclick_event . '>' . $current_day . $booked_time_str . '</td>';
                 } else {
-                    // For past dates, we don't add the onclick event and don't change any visual style.
+                    // For past dates, don't add the onclick event and don't change any visual style.
                     echo '<td class="booking-slot" data-day="' . $day . '" data-date="' . $current_cell_date . '" 
                         style="' . $highlight_border . ' height: 100px; vertical-align: top; width: 14.28%; 
-                        text-align: right; padding: 5px;opacity: 0.7;">' . $current_day . $booked_time_str . '</td>';
+                        text-align: right; padding: 5px;opacity: 0.3;">' . $current_day . $booked_time_str . '</td>';
                 }
                 $current_day++;
             } else {
