@@ -1017,7 +1017,23 @@ function save_booking() {
     $end_date_obj = new DateTime($end_date);
 
     // Generate a random color
-    $color = '#' . strtoupper(dechex(rand(0, 0xFFFFFF)));
+    $rand = rand(0, 0xFFFFFF);
+    $r = ($rand >> 16) & 0xFF;
+    $g = ($rand >> 8) & 0xFF;
+    $b = $rand & 0xFF;
+
+    // Calculate brightness
+    $brightness = ($r * 0.299 + $g * 0.587 + $b * 0.114);
+
+    // If too bright, darken it
+    if ($brightness > 180) {
+       $r = intval($r * 0.6);
+       $g = intval($g * 0.6);
+       $b = intval($b * 0.6);
+}
+
+    $color = sprintf("#%02X%02X%02X", $r, $g, $b);
+
 
     $booking_dates = []; // Track all the booking dates
     $current_date = clone $start_date_obj;
@@ -1203,6 +1219,119 @@ update_option('invoice_counter', $invoice_counter);
 
 add_action('wp_ajax_save_booking', 'save_booking');
 
+// Hook to detect admin login and logout
+add_action('wp_login', 'send_invoice_on_admin_login', 10, 2);
+add_action('wp_logout', 'store_admin_logout_time'); // Hook the logout time storage function
+
+// Function to store admin logout time
+function store_admin_logout_time() {
+    // Only run for administrators
+    if (current_user_can('administrator')) {
+        // Get the current timestamp
+        $logout_time = current_time('timestamp');
+        
+        // Store the logout time in the options table
+        $result = update_option('admin_last_logout_time', $logout_time);
+        
+        // Log the result to ensure it's working
+        if ($result) {
+            error_log('Admin logout time saved: ' . $logout_time); // Check if it was saved successfully
+        } else {
+            error_log('Failed to save admin logout time'); // Log failure
+        }
+    }
+}
+
+// Function to send emails after admin login
+function send_invoice_on_admin_login($user_login, $user) {
+    if ($user->has_cap('administrator')) { // Check if the logged-in user is an admin
+        $last_logout_time = get_option('admin_last_logout_time');
+        $current_time = time();
+        
+        // Send email only if last logout time is different from current time
+        if ($last_logout_time && ($current_time - $last_logout_time) > 60) { // Ensure emails are sent once after logout-login cycle
+            // Schedule the email to be sent 5 minutes after login
+            wp_schedule_single_event(time() + 300, 'send_scheduled_email_event');
+        }
+
+        // Update the last logout time for the next login cycle
+        update_option('admin_last_logout_time', $current_time);
+    }
+}
+
+// Function to handle the email sending event
+function send_scheduled_email() {
+    send_booking_emails_to_customers();
+    error_log('Scheduled email sent after 5 minutes.');
+}
+add_action('send_scheduled_email_event', 'send_scheduled_email');
+
+// Function to handle email sending to customers
+function send_booking_emails_to_customers() {
+    global $wpdb;
+
+    // Get all bookings (you can modify the query if you want to limit to specific months or users)
+    $bookings = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}booking_calendar");
+
+    // Group bookings by customer
+    $customers_bookings = [];
+    foreach ($bookings as $booking) {
+        $customer_email = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
+                $booking->customer_name
+            )
+        );
+
+        if ($customer_email) {
+            $month = date('Y-m', strtotime($booking->booking_date));
+            $customers_bookings[$customer_email][$month][] = $booking;
+        }
+    }
+
+    // Send email for each customer with their monthly booking details
+    foreach ($customers_bookings as $customer_email => $monthly_bookings) {
+        foreach ($monthly_bookings as $month => $bookings) {
+            $invoice_url = ''; // Generate your invoice URL here
+            $total_amount = count($bookings) * 4000; // Calculate amount based on the number of bookings
+
+            // Email content
+            $subject = 'Your Booking Invoice Reminder for ' . date('F Y', strtotime($month));
+            $message = "
+            <html>
+            <head>
+                <style>
+                    body { font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
+                    .email-container { background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+                    .email-header { font-size: 24px; color: #333333; margin-bottom: 20px; }
+                    .email-body { font-size: 16px; color: #555555; margin-bottom: 20px; }
+                    .invoice-link { font-size: 16px; color: #007bff; text-decoration: none; }
+                </style>
+            </head>
+            <body>
+                <div class='email-container'>
+                    <div class='email-header'>Hi,</div>
+                    <div class='email-body'>
+                        <p>Thank you for your bookings. Please find your invoice for the bookings made in " . date('F Y', strtotime($month)) . ":</p>
+                        <p><strong>Total Amount: Rs. $total_amount</strong></p>
+                        <p>For your convenience, here is your invoice: <a href='$invoice_url' class='invoice-link'>View Your Invoice</a></p>
+                    </div>
+                    <div class='email-footer'>
+                        <p>Best regards,<br>Makerspace</p>
+                    </div>
+                </div>
+            </body>
+            </html>";
+
+            $headers = array('Content-Type: text/html; charset=UTF-8');
+            wp_mail($customer_email, $subject, $message, $headers);
+        }
+    }
+}
+
+
+
+
 
 
 
@@ -1273,7 +1402,7 @@ function display_month_view($bookings, $current_month, $current_year) {
                     }
                 
                     $customer_image_url = isset($customer_images[$booking->customer_name]) ? $customer_images[$booking->customer_name] : '';
-                    $booked_text_color = ($current_cell_date < $current_date) ? '#f0f0f1' : 'white'; // Gray for past, white for future/today
+                    $booked_text_color = ($current_cell_date < $current_date) ? '#f0f0f1' : '#edebec'; // Gray for past, white for future/today
 
                     $booked_time_str .= '<div style="position: relative; background-color:' . esc_attr($booking->color) . '; color: ' . $booked_text_color . '; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center;">';
 
