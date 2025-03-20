@@ -1,6 +1,5 @@
 <?php   
 
-
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -37,7 +36,7 @@ function booking_calendar_install() {
         date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         FOREIGN KEY (booking_id) REFERENCES $table_name(id) ON DELETE CASCADE
-    ) $charset_collate;";
+        ) $charset_collate;";
 
     // Customers Table
     $sql3 = "CREATE TABLE $customer_table (
@@ -1001,7 +1000,7 @@ register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
 
 
-function save_booking() {
+function save_booking() { 
     global $wpdb;
 
     // Get data from the AJAX request
@@ -1030,10 +1029,9 @@ function save_booking() {
        $r = intval($r * 0.6);
        $g = intval($g * 0.6);
        $b = intval($b * 0.6);
-}
+    }
 
     $color = sprintf("#%02X%02X%02X", $r, $g, $b);
-
 
     $booking_dates = []; // Track all the booking dates
     $current_date = clone $start_date_obj;
@@ -1079,68 +1077,97 @@ function save_booking() {
         $current_date->modify('+1 week');
     }
 
-$booking_id = $wpdb->insert_id;
-$invoice_counter = get_option('invoice_counter', 1); // Default to 1
+    $booking_id = $wpdb->insert_id;
+    $invoice_counter = get_option('invoice_counter', 1); // Default to 1
 
-// Group booking dates by month
-$monthly_bookings = [];
-foreach ($booking_dates as $date) {
-    $month_key = date('Y-m', strtotime($date));
-    if (!isset($monthly_bookings[$month_key])) {
-        $monthly_bookings[$month_key] = [];
+    // Group booking dates by month
+    $monthly_bookings = [];
+    foreach ($booking_dates as $date) {
+        $month_key = date('Y-m', strtotime($date));
+        if (!isset($monthly_bookings[$month_key])) {
+            $monthly_bookings[$month_key] = [];
+        }
+        $monthly_bookings[$month_key][] = $date;
     }
-    $monthly_bookings[$month_key][] = $date;
+
+    $invoice_urls = [];
+    $all_invoice_numbers = [];
+    $total_amount = 0;
+
+    // Counter for delay in seconds (2-minute delay between each email)
+    $delay_counter = 0;
+
+    foreach ($monthly_bookings as $month => $dates) {
+        $count = count($dates);
+        $amount = $count * 4000;
+        $total_amount += $amount;
+
+        // Generate invoice number
+        $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+        $all_invoice_numbers[] = $invoice_number;
+
+        // Insert invoice
+        $wpdb->insert(
+            $wpdb->prefix . 'booking_invoices',
+            array(
+                'booking_id' => $booking_id,
+                'invoice_number' => $invoice_number,
+                'amount' => $amount
+            )
+        );
+
+        $invoice_id = $wpdb->insert_id;
+        $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
+
+        $invoice_counter++;
+
+        // Get customer email from wp_booking_customers table
+        $customer_email = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
+                $customer_name
+            )
+        );
+
+        // Generate invoice URL
+        $invoice_id = $wpdb->insert_id;
+        $invoice_url = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
+
+        // Send the first invoice email immediately
+        if ($customer_email && $delay_counter == 0) {
+            send_invoice_email($customer_email, $invoice_number, $amount, $invoice_url, $customer_name, $dates);
+        }
+
+        // Schedule subsequent invoice emails with a delay
+        if ($customer_email && $delay_counter > 0) {
+            wp_schedule_single_event(time() + $delay_counter, 'send_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_url, $customer_name, $dates));
+        }
+
+        // Increment delay by 2 minutes (120 seconds) for each subsequent email
+        $delay_counter += 2 * 60;
+    }
+
+    // Update the invoice counter in options
+    update_option('invoice_counter', $invoice_counter);
+
+$redirect_url = 'https://designhouse.lk/wp-admin/admin.php?page=view-invoice';
+
+wp_send_json_success([
+    'message' => 'Booking saved successfully!',
+    'invoice_urls' => $invoice_urls,
+    'redirect_url' => $redirect_url
+]);
+
 }
 
-$invoice_urls = [];
-$all_invoice_numbers = [];
-$total_amount = 0;
+add_action('wp_ajax_save_booking', 'save_booking');
 
-foreach ($monthly_bookings as $month => $dates) {
-    $count = count($dates);
-    $amount = $count * 4000;
-    $total_amount += $amount;
-
-    // Generate invoice number
-    $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
-    $all_invoice_numbers[] = $invoice_number;
-
-    // Insert invoice
-    $wpdb->insert(
-        $wpdb->prefix . 'booking_invoices',
-        array(
-            'booking_id' => $booking_id,
-            'invoice_number' => $invoice_number,
-            'amount' => $amount
-        )
-    );
-
-    $invoice_id = $wpdb->insert_id;
-    $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
-
-    $invoice_counter++;
-    // Get customer email from wp_booking_customers table
-    $customer_email = $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
-            $customer_name
-        )
-    );
-
-    // Generate invoice URL
-    $invoice_id = $wpdb->insert_id;
-    $invoice_url = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
-
-    // Send invoice email to customer
-// Inside the foreach loop, after invoice_url is generated
-
-// Send invoice email to customer (inside the loop)
-if ($customer_email) {
+// Send invoice email function
+function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_url, $customer_name, $dates) {
     $formatted_start = reset($dates); // First date of the month
     $formatted_end = end($dates);     // Last date of the month
 
-    $subject = 'Your Booking Invoice – ' . date('F Y', strtotime($month));
-    
+    $subject = 'Your Booking Invoice – ' . date('F Y', strtotime($formatted_start));
     $message = "
     <html>
     <head>
@@ -1201,133 +1228,120 @@ if ($customer_email) {
     wp_mail($customer_email, $subject, $message, $headers);
 }
 
-}
-
-// Update the invoice counter in options
-update_option('invoice_counter', $invoice_counter);
-
-
-
-
-
-    // Send success response
-    wp_send_json_success([
-        'message' => 'Booking saved successfully!',
-        'invoice_url' => $invoice_url
-    ]);
-}
-
-add_action('wp_ajax_save_booking', 'save_booking');
+// Hook to ensure the scheduled event runs
+add_action('send_invoice_email', 'send_invoice_email', 10, 6);
 
 // Hook to detect admin login and logout
-add_action('wp_login', 'send_invoice_on_admin_login', 10, 2);
-add_action('wp_logout', 'store_admin_logout_time'); // Hook the logout time storage function
+//add_action('wp_login', 'send_invoice_on_admin_login', 10, 2);
+//add_action('wp_logout', 'store_admin_logout_time'); // Hook the logout time storage function
+//
+//// Function to store admin logout time
+//function store_admin_logout_time() {
+//    // Only run for administrators
+//    if (current_user_can('administrator')) {
+//        // Get the current timestamp
+//        $logout_time = current_time('timestamp');
+//        
+//        // Store the logout time in the options table
+//        $result = update_option('admin_last_logout_time', $logout_time);
+//        
+//        // Log the result to ensure it's working
+//        if ($result) {
+//            error_log('Admin logout time saved: ' . $logout_time); // Check if it was saved successfully
+//        } else {
+//            error_log('Failed to save admin logout time'); // Log failure
+//        }
+//    }
+//}
+//
+//// Function to send emails after admin login
+//function send_invoice_on_admin_login($user_login, $user) {
+//    if ($user->has_cap('administrator')) { // Check if the logged-in user is an admin
+//        $last_logout_time = get_option('admin_last_logout_time');
+//        $current_time = time();
+//        
+//        // Send email only if last logout time is different from current time
+//        if ($last_logout_time && ($current_time - $last_logout_time) > 60) { // Ensure emails are sent once after logout-login cycle
+//            // Schedule the email to be sent 5 minutes after login
+//            wp_schedule_single_event(time() + 300, 'send_scheduled_email_event');
+//        }
+//
+//        // Update the last logout time for the next login cycle
+//        update_option('admin_last_logout_time', $current_time);
+//    }
+//}
+//
+//// Function to handle the email sending event
+//function send_scheduled_email() {
+//    send_booking_emails_to_customers();
+//    error_log('Scheduled email sent after 5 minutes.');
+//}
+//add_action('send_scheduled_email_event', 'send_scheduled_email');
+//
+//// Function to handle email sending to customers
+//function send_booking_emails_to_customers() {
+//    global $wpdb;
+//
+//    // Get all bookings (you can modify the query if you want to limit to specific months or users)
+//    $bookings = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}booking_calendar");
+//
+//    // Group bookings by customer
+//    $customers_bookings = [];
+//    foreach ($bookings as $booking) {
+//        $customer_email = $wpdb->get_var(
+//            $wpdb->prepare(
+//                "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
+//                $booking->customer_name
+//            )
+//        );
+//
+//        if ($customer_email) {
+//            $month = date('Y-m', strtotime($booking->booking_date));
+//            $customers_bookings[$customer_email][$month][] = $booking;
+//        }
+//    }
+//
+//    // Send email for each customer with their monthly booking details
+//    foreach ($customers_bookings as $customer_email => $monthly_bookings) {
+//        foreach ($monthly_bookings as $month => $bookings) {
+//            $invoice_url = ''; // Generate your invoice URL here
+//            $total_amount = count($bookings) * 4000; // Calculate amount based on the number of bookings
+//
+//            // Email content
+//            $subject = 'Your Booking Invoice Reminder for ' . date('F Y', strtotime($month));
+//            $message = "
+//            <html>
+//            <head>
+//                <style>
+//                    body { font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
+//                    .email-container { background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+//                    .email-header { font-size: 24px; color: #333333; margin-bottom: 20px; }
+//                    .email-body { font-size: 16px; color: #555555; margin-bottom: 20px; }
+//                    .invoice-link { font-size: 16px; color: #007bff; text-decoration: none; }
+//                </style>
+//            </head>
+//            <body>
+//                <div class='email-container'>
+//                    <div class='email-header'>Hi,</div>
+//                    <div class='email-body'>
+//                        <p>Thank you for your bookings. Please find your invoice for the bookings made in " . date('F Y', strtotime($month)) . ":</p>
+//                        <p><strong>Total Amount: Rs. $total_amount</strong></p>
+//                        <p>For your convenience, here is your invoice: <a href='$invoice_url' class='invoice-link'>View Your Invoice</a></p>
+//                    </div>
+//                    <div class='email-footer'>
+//                        <p>Best regards,<br>Makerspace</p>
+//                    </div>
+//                </div>
+//            </body>
+//            </html>";
+//
+//            $headers = array('Content-Type: text/html; charset=UTF-8');
+//            wp_mail($customer_email, $subject, $message, $headers);
+//        }
+//    }
+//}
 
-// Function to store admin logout time
-function store_admin_logout_time() {
-    // Only run for administrators
-    if (current_user_can('administrator')) {
-        // Get the current timestamp
-        $logout_time = current_time('timestamp');
-        
-        // Store the logout time in the options table
-        $result = update_option('admin_last_logout_time', $logout_time);
-        
-        // Log the result to ensure it's working
-        if ($result) {
-            error_log('Admin logout time saved: ' . $logout_time); // Check if it was saved successfully
-        } else {
-            error_log('Failed to save admin logout time'); // Log failure
-        }
-    }
-}
 
-// Function to send emails after admin login
-function send_invoice_on_admin_login($user_login, $user) {
-    if ($user->has_cap('administrator')) { // Check if the logged-in user is an admin
-        $last_logout_time = get_option('admin_last_logout_time');
-        $current_time = time();
-        
-        // Send email only if last logout time is different from current time
-        if ($last_logout_time && ($current_time - $last_logout_time) > 60) { // Ensure emails are sent once after logout-login cycle
-            // Schedule the email to be sent 5 minutes after login
-            wp_schedule_single_event(time() + 300, 'send_scheduled_email_event');
-        }
-
-        // Update the last logout time for the next login cycle
-        update_option('admin_last_logout_time', $current_time);
-    }
-}
-
-// Function to handle the email sending event
-function send_scheduled_email() {
-    send_booking_emails_to_customers();
-    error_log('Scheduled email sent after 5 minutes.');
-}
-add_action('send_scheduled_email_event', 'send_scheduled_email');
-
-// Function to handle email sending to customers
-function send_booking_emails_to_customers() {
-    global $wpdb;
-
-    // Get all bookings (you can modify the query if you want to limit to specific months or users)
-    $bookings = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}booking_calendar");
-
-    // Group bookings by customer
-    $customers_bookings = [];
-    foreach ($bookings as $booking) {
-        $customer_email = $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
-                $booking->customer_name
-            )
-        );
-
-        if ($customer_email) {
-            $month = date('Y-m', strtotime($booking->booking_date));
-            $customers_bookings[$customer_email][$month][] = $booking;
-        }
-    }
-
-    // Send email for each customer with their monthly booking details
-    foreach ($customers_bookings as $customer_email => $monthly_bookings) {
-        foreach ($monthly_bookings as $month => $bookings) {
-            $invoice_url = ''; // Generate your invoice URL here
-            $total_amount = count($bookings) * 4000; // Calculate amount based on the number of bookings
-
-            // Email content
-            $subject = 'Your Booking Invoice Reminder for ' . date('F Y', strtotime($month));
-            $message = "
-            <html>
-            <head>
-                <style>
-                    body { font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
-                    .email-container { background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
-                    .email-header { font-size: 24px; color: #333333; margin-bottom: 20px; }
-                    .email-body { font-size: 16px; color: #555555; margin-bottom: 20px; }
-                    .invoice-link { font-size: 16px; color: #007bff; text-decoration: none; }
-                </style>
-            </head>
-            <body>
-                <div class='email-container'>
-                    <div class='email-header'>Hi,</div>
-                    <div class='email-body'>
-                        <p>Thank you for your bookings. Please find your invoice for the bookings made in " . date('F Y', strtotime($month)) . ":</p>
-                        <p><strong>Total Amount: Rs. $total_amount</strong></p>
-                        <p>For your convenience, here is your invoice: <a href='$invoice_url' class='invoice-link'>View Your Invoice</a></p>
-                    </div>
-                    <div class='email-footer'>
-                        <p>Best regards,<br>Makerspace</p>
-                    </div>
-                </div>
-            </body>
-            </html>";
-
-            $headers = array('Content-Type: text/html; charset=UTF-8');
-            wp_mail($customer_email, $subject, $message, $headers);
-        }
-    }
-}
 
 
 
@@ -1403,6 +1417,7 @@ function display_month_view($bookings, $current_month, $current_year) {
                 
                     $customer_image_url = isset($customer_images[$booking->customer_name]) ? $customer_images[$booking->customer_name] : '';
                     $booked_text_color = ($current_cell_date < $current_date) ? '#f0f0f1' : '#edebec'; // Gray for past, white for future/today
+                    
 
                     $booked_time_str .= '<div style="position: relative; background-color:' . esc_attr($booking->color) . '; color: ' . $booked_text_color . '; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center;">';
 
@@ -2046,7 +2061,7 @@ function updateStartEndTime() {
 
                 $.post(ajaxurl, formData + '&action=save_booking', function (response) {
                     if (response.success) {
-                        window.location.href = response.data.invoice_url;
+                        window.location.href = response.data.redirect_url;
                     } else {
                         alert('Time slot is already booked for this date. Please choose available time slots.');
                     }
