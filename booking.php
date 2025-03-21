@@ -34,6 +34,8 @@ function booking_calendar_install() {
         invoice_number VARCHAR(20) NOT NULL,
         amount DECIMAL(10,2) NOT NULL,
         date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        payment_slip VARCHAR(255).,
+        payment_status VARCHAR(20) DEFAULT 'Pending',  // Added payment_status column
         PRIMARY KEY (id),
         FOREIGN KEY (booking_id) REFERENCES $table_name(id) ON DELETE CASCADE
         ) $charset_collate;";
@@ -762,67 +764,144 @@ function add_payment_page() {
     );
 }
 add_action('admin_menu', 'add_payment_page');
-function display_payment_page() {
+
+
+function display_payment_page() { 
     global $wpdb;
 
-    // Fetch all invoices from the database
     $invoices = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}booking_invoices");
 
-    // Check if there are any invoices
     if (empty($invoices)) {
         echo '<h2>No invoices found.</h2>';
         return;
     }
 
     echo '<h2>Invoice Details</h2>';
-    echo '<table class="wp-list-table widefat fixed striped invoices-table" cellspacing="0" cellpadding="5" style="width:100%; border: 1px solid #ddd; margin-bottom: 20px;">
-            <thead>
-                <tr>
-                    <th style="border: 1px solid #ddd;">Invoice Number</th>
-                    <th style="border: 1px solid #ddd;">Customer Name</th>
-                    <th style="border: 1px solid #ddd;">Booking Date(s)</th>
-                    <th style="border: 1px solid #ddd;">Amount</th>
-                    <th style="border: 1px solid #ddd;">Payment Status</th>
-                    <th style="border: 1px solid #ddd;">Actions</th>
-                </tr>
-            </thead>
-            <tbody>';
 
-    // Loop through the invoices and display each one in a row
+    // Table styles and form start
+    echo '<form method="post" enctype="multipart/form-data">';
+    echo '<style>
+        .upload-button {
+            cursor: pointer;
+            display: inline-block;
+            margin-bottom: 5px;
+        }
+        .upload-wrapper {
+            display: flex;
+            align-items: center;  /* Ensures buttons are aligned horizontally */
+            gap: 10px;  /* Adds space between the buttons */
+        }
+    </style>';
+
+    echo '<table class="wp-list-table widefat fixed striped invoices-table" cellspacing="0" cellpadding="5" style="width:100%; border: 1px solid #ddd; margin-bottom: 20px;">
+        <thead>
+            <tr>
+                <th>Invoice Number</th>
+                <th>Customer Name</th>
+                <th>Booking Date(s)</th>
+                <th>Amount</th>
+                <th>Payment Status</th>
+                <th>Upload Payment Slip</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>';
+
     foreach ($invoices as $invoice) {
-        // Get the associated booking
         $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
 
         if ($booking) {
             echo '<tr>';
-            echo '<td style="border: 1px solid #ddd;">' . esc_html($invoice->invoice_number) . '</td>';
-            echo '<td style="border: 1px solid #ddd;">' . esc_html($booking->customer_name) . '</td>';
-            echo '<td style="border: 1px solid #ddd;">' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
-            echo '<td style="border: 1px solid #ddd;">Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
+            echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
+            echo '<td>' . esc_html($booking->customer_name) . '</td>';
+            echo '<td>' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
+            echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
 
-            // Display the payment status (you can customize this part based on how you store the status)
-            $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending'; // Assuming `payment_status` is a column in the invoice table
-            echo '<td style="border: 1px solid #ddd;">' . $payment_status . '</td>';
+            $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
+            echo '<td>' . $payment_status . '</td>';
 
-            // Add a button for actions (such as downloading PDF)
-            echo '<td style="border: 1px solid #ddd;">
-                    <button class="button download-pdf"
-                        data-invoice-number="' . esc_attr($invoice->invoice_number) . '"
-                        data-customer-name="' . esc_attr($booking->customer_name) . '"
-                        data-start-date="' . esc_attr($booking->start_date) . '"
-                        data-end-date="' . esc_attr($booking->booking_date) . '"
-                        data-booking-type="' . esc_attr($booking->booking_type) . '"
-                        data-amount="' . esc_attr(number_format($invoice->amount, 2)) . '">
-                        View Invoice
-                    </button>
-                  </td>';
+            // If the payment status is pending, send an email to the customer
+            if ($payment_status === 'Pending') {
+                send_pending_payment_email($booking->customer_name, $booking->customer_email, $invoice->invoice_number);
+            }
+
+            // Upload section
+            echo '<td>';
+            if (!empty($invoice->payment_slip)) {
+                echo '<a href="' . esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) . '" target="_blank"><span class="dashicons dashicons-visibility"></span> View Slip</a>';
+            } else {
+                $input_id = 'payment_slip_' . esc_attr($invoice->id);
+                echo '<div class="upload-wrapper">';
+                echo '<input type="file" name="' . $input_id . '" id="' . $input_id . '" style="display:none;">';
+                echo '<label for="' . $input_id . '" class="button upload-button"><span class="dashicons dashicons-paperclip"></span> Upload</label>';
+                echo '<button class="button" name="upload_slip_' . esc_attr($invoice->id) . '"><span class="dashicons dashicons-upload"></span> Submit</button>';
+                echo '</div>';
+            }
+            echo '</td>';
+
+            echo '<td><button class="button download-pdf" data-invoice-number="' . esc_attr($invoice->invoice_number) . '">View Invoice</button></td>';
             echo '</tr>';
         }
     }
 
-    echo '</tbody>
-          </table>';
+    echo '</tbody></table></form>';
+
+    handle_payment_slip_upload($invoices);
 }
+
+function send_pending_payment_email($customer_name, $customer_email, $invoice_number) {
+    $subject = "Pending Payment for Invoice #$invoice_number";
+    $message = "Dear $customer_name,\n\n";
+    $message .= "This is a reminder that your payment for Invoice #$invoice_number is still pending.\n";
+    $message .= "Please make the payment at your earliest convenience.\n\n";
+    $message .= "Thank you for your attention.\n";
+    $message .= "Best regards,\n";
+    $message .= "Your Company Name";
+
+    // Send email
+    wp_mail($customer_email, $subject, $message);
+}
+
+function handle_payment_slip_upload($invoices) {
+    global $wpdb;
+
+    foreach ($invoices as $invoice) {
+        $upload_field = 'payment_slip_' . $invoice->id;
+        $submit_field = 'upload_slip_' . $invoice->id;
+
+        if (isset($_POST[$submit_field]) && isset($_FILES[$upload_field]) && !empty($_FILES[$upload_field]['name'])) {
+            $file = $_FILES[$upload_field];
+
+            require_once(ABSPATH . 'wp-admin/includes/file.php');
+            require_once(ABSPATH . 'wp-admin/includes/media.php');
+            require_once(ABSPATH . 'wp-admin/includes/image.php');
+
+            $upload_overrides = array('test_form' => false);
+            $movefile = wp_handle_upload($file, $upload_overrides);
+
+            if ($movefile && !isset($movefile['error'])) {
+                $file_url = str_replace(wp_upload_dir()['baseurl'] . '/', '', $movefile['url']);
+
+                $wpdb->update(
+                    "{$wpdb->prefix}booking_invoices",
+                    array(
+                        'payment_slip' => $file_url,
+                        'payment_status' => 'Paid'  // Update payment status to Paid
+                    ),
+                    array('id' => $invoice->id)
+                    );
+
+                // Redirect to the same page to show "View Slip"
+                wp_redirect($_SERVER['REQUEST_URI']);
+                exit;
+            } else {
+                echo '<div class="notice notice-error"><p>Error uploading payment slip for Invoice #' . esc_html($invoice->invoice_number) . ': ' . esc_html($movefile['error']) . '</p></div>';
+            }
+        }
+    }
+}
+
+
 
 
 
