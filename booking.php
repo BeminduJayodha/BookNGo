@@ -1,6 +1,5 @@
 <?php   
 
-// Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -766,6 +765,7 @@ function add_payment_page() {
 add_action('admin_menu', 'add_payment_page');
 
 
+
 function display_payment_page() { 
     global $wpdb;
 
@@ -820,11 +820,6 @@ function display_payment_page() {
             $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
             echo '<td>' . $payment_status . '</td>';
 
-            // If the payment status is pending, send an email to the customer
-            if ($payment_status === 'Pending') {
-                send_pending_payment_email($booking->customer_name, $booking->customer_email, $invoice->invoice_number);
-            }
-
             // Upload section
             echo '<td>';
             if (!empty($invoice->payment_slip)) {
@@ -847,19 +842,6 @@ function display_payment_page() {
     echo '</tbody></table></form>';
 
     handle_payment_slip_upload($invoices);
-}
-
-function send_pending_payment_email($customer_name, $customer_email, $invoice_number) {
-    $subject = "Pending Payment for Invoice #$invoice_number";
-    $message = "Dear $customer_name,\n\n";
-    $message .= "This is a reminder that your payment for Invoice #$invoice_number is still pending.\n";
-    $message .= "Please make the payment at your earliest convenience.\n\n";
-    $message .= "Thank you for your attention.\n";
-    $message .= "Best regards,\n";
-    $message .= "Your Company Name";
-
-    // Send email
-    wp_mail($customer_email, $subject, $message);
 }
 
 function handle_payment_slip_upload($invoices) {
@@ -890,6 +872,7 @@ function handle_payment_slip_upload($invoices) {
                     ),
                     array('id' => $invoice->id)
                     );
+
 
                 // Redirect to the same page to show "View Slip"
                 wp_redirect($_SERVER['REQUEST_URI']);
@@ -1079,7 +1062,7 @@ register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
 
 
-function save_booking() { 
+function save_booking() {
     global $wpdb;
 
     // Get data from the AJAX request
@@ -1105,9 +1088,9 @@ function save_booking() {
 
     // If too bright, darken it
     if ($brightness > 180) {
-       $r = intval($r * 0.6);
-       $g = intval($g * 0.6);
-       $b = intval($b * 0.6);
+        $r = intval($r * 0.6);
+        $g = intval($g * 0.6);
+        $b = intval($b * 0.6);
     }
 
     $color = sprintf("#%02X%02X%02X", $r, $g, $b);
@@ -1186,12 +1169,14 @@ function save_booking() {
         $all_invoice_numbers[] = $invoice_number;
 
         // Insert invoice
+        $invoice_sent_at = current_time('mysql'); // Get current time in MySQL format
         $wpdb->insert(
             $wpdb->prefix . 'booking_invoices',
             array(
                 'booking_id' => $booking_id,
                 'invoice_number' => $invoice_number,
-                'amount' => $amount
+                'amount' => $amount,
+                'invoice_sent_at' => $invoice_sent_at // Store timestamp when invoice is sent
             )
         );
 
@@ -1208,41 +1193,43 @@ function save_booking() {
             )
         );
 
-        // Generate invoice URL
-        $invoice_id = $wpdb->insert_id;
-        $invoice_url = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
-
         // Send the first invoice email immediately
         if ($customer_email && $delay_counter == 0) {
-            send_invoice_email($customer_email, $invoice_number, $amount, $invoice_url, $customer_name, $dates);
+            send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
+
+            // Schedule reminder email 3 minutes after the first invoice email
+            wp_schedule_single_event(time() + 3 * 60, 'send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
         }
 
-        // Schedule subsequent invoice emails with a delay
-        if ($customer_email && $delay_counter > 0) {
-            wp_schedule_single_event(time() + $delay_counter, 'send_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_url, $customer_name, $dates));
-        }
+// Schedule subsequent invoice emails with a delay
+if ($customer_email && $delay_counter > 0) {
+    wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
-        // Increment delay by 2 minutes (120 seconds) for each subsequent email
-        $delay_counter += 2 * 60;
+       // Schedule reminder email 3 minutes after the subsequent invoice email is sent
+    wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
+}
+
+// Increment delay by 2 minutes (120 seconds) for each subsequent email
+$delay_counter += 2 * 60; // 2 minutes (120 seconds)
+
     }
 
     // Update the invoice counter in options
     update_option('invoice_counter', $invoice_counter);
 
-$redirect_url = 'https://designhouse.lk/wp-admin/admin.php?page=view-invoice';
+    $redirect_url = 'https://designhouse.lk/wp-admin/admin.php?page=view-invoice';
 
-wp_send_json_success([
-    'message' => 'Booking saved successfully!',
-    'invoice_urls' => $invoice_urls,
-    'redirect_url' => $redirect_url
-]);
-
+    wp_send_json_success([
+        'message' => 'Booking saved successfully!',
+        'invoice_urls' => $invoice_urls,
+        'redirect_url' => $redirect_url
+    ]);
 }
 
 add_action('wp_ajax_save_booking', 'save_booking');
 
 // Send invoice email function
-function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_url, $customer_name, $dates) {
+function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates) {
     $formatted_start = reset($dates); // First date of the month
     $formatted_end = end($dates);     // Last date of the month
 
@@ -1294,6 +1281,67 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
                 <p><strong>Amount:</strong> Rs. $amount</p>
                 <p><strong>Booking Period:</strong> $formatted_start to $formatted_end</p>
                 <p>You can view your invoice by clicking the link below:</p>
+                <p><a href='$invoice_urls[0]' class='invoice-link'>View Your Invoice</a></p>
+            </div>
+            <div class='email-footer'>
+                <p>Best regards,<br>Makerspace Team</p>
+            </div>
+        </div>
+    </body>
+    </html>";
+
+    $headers = array('Content-Type: text/html; charset=UTF-8');
+    wp_mail($customer_email, $subject, $message, $headers);
+}
+
+// Send reminder email function
+function send_reminder_email($customer_email, $invoice_number, $invoice_url) {
+    $subject = 'Reminder: Your Booking Invoice – ' . $invoice_number;
+    $message = "
+    <html>
+    <head>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background-color: #f4f4f4;
+                padding: 20px;
+            }
+            .email-container {
+                background-color: #ffffff;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            }
+            .email-header {
+                font-size: 24px;
+                color: #333333;
+                margin-bottom: 20px;
+            }
+            .email-body {
+                font-size: 16px;
+                color: #555555;
+                margin-bottom: 20px;
+            }
+            .email-footer {
+                font-size: 14px;
+                color: #777777;
+                text-align: center;
+                margin-top: 20px;
+            }
+            .invoice-link {
+                font-size: 16px;
+                color: #007bff;
+                text-decoration: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class='email-container'>
+            <div class='email-header'>Hi,</div>
+            <div class='email-body'>
+                <p>This is a reminder for your booking invoice.</p>
+                <p><strong>Invoice Number:</strong> $invoice_number</p>
+                <p>You can view your invoice by clicking the link below:</p>
                 <p><a href='$invoice_url' class='invoice-link'>View Your Invoice</a></p>
             </div>
             <div class='email-footer'>
@@ -1308,7 +1356,77 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
 }
 
 // Hook to ensure the scheduled event runs
-add_action('send_invoice_email', 'send_invoice_email', 10, 6);
+add_action('send_reminder_email', 'send_reminder_email', 10, 3);
+// Function to send subsequent invoice emails
+function send_subsequent_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates) {
+    // You can add your logic here to send the invoice email (similar to your first email)
+    $formatted_start = reset($dates); // First date of the month
+    $formatted_end = end($dates);     // Last date of the month
+
+    $subject = 'Your Booking Invoice – ' . date('F Y', strtotime($formatted_start));
+    $message = "
+    <html>
+    <head>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background-color: #f4f4f4;
+                padding: 20px;
+            }
+            .email-container {
+                background-color: #ffffff;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            }
+            .email-header {
+                font-size: 24px;
+                color: #333333;
+                margin-bottom: 20px;
+            }
+            .email-body {
+                font-size: 16px;
+                color: #555555;
+                margin-bottom: 20px;
+            }
+            .email-footer {
+                font-size: 14px;
+                color: #777777;
+                text-align: center;
+                margin-top: 20px;
+            }
+            .invoice-link {
+                font-size: 16px;
+                color: #007bff;
+                text-decoration: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class='email-container'>
+            <div class='email-header'>Hi $customer_name,</div>
+            <div class='email-body'>
+                <p>Thank you for your booking.</p>
+                <p><strong>Invoice Number:</strong> $invoice_number</p>
+                <p><strong>Amount:</strong> Rs. $amount</p>
+                <p><strong>Booking Period:</strong> $formatted_start to $formatted_end</p>
+                <p>You can view your invoice by clicking the link below:</p>
+                <p><a href='$invoice_urls[0]' class='invoice-link'>View Your Invoice</a></p>
+            </div>
+            <div class='email-footer'>
+                <p>Best regards,<br>Makerspace Team</p>
+            </div>
+        </div>
+    </body>
+    </html>";
+
+    $headers = array('Content-Type: text/html; charset=UTF-8');
+    wp_mail($customer_email, $subject, $message, $headers);
+}
+
+// Hook to send subsequent invoice emails
+add_action('send_subsequent_invoice_email', 'send_subsequent_invoice_email', 10, 6);
+
 
 // Hook to detect admin login and logout
 //add_action('wp_login', 'send_invoice_on_admin_login', 10, 2);
