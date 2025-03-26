@@ -1,5 +1,7 @@
 <?php   
 
+
+// Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -1193,24 +1195,25 @@ function save_booking() {
             )
         );
 
-        // Send the first invoice email immediately
-        if ($customer_email && $delay_counter == 0) {
-            send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
+// Send invoice emails and schedule reminder checks
+if ($customer_email && $delay_counter == 0) {
+    send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
 
-            // Schedule reminder email 3 minutes after the first invoice email
-            wp_schedule_single_event(time() + 3 * 60, 'send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
-        }
+    // Schedule reminder email 3 minutes after the first invoice email
+    wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
+}
 
 // Schedule subsequent invoice emails with a delay
 if ($customer_email && $delay_counter > 0) {
     wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
-       // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-    wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
+    // Schedule reminder email 3 minutes after the subsequent invoice email is sent
+    wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
 }
 
 // Increment delay by 2 minutes (120 seconds) for each subsequent email
 $delay_counter += 2 * 60; // 2 minutes (120 seconds)
+
 
     }
 
@@ -1293,6 +1296,46 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
     $headers = array('Content-Type: text/html; charset=UTF-8');
     wp_mail($customer_email, $subject, $message, $headers);
 }
+
+// Function to check payment status and send reminder email
+function check_and_send_reminder_email($customer_email, $invoice_number, $invoice_url) {
+    global $wpdb;
+
+    // Get payment status for this specific invoice
+    $payment_status = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT payment_status FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1",
+            $invoice_number
+        )
+    );
+
+    // If the invoice is paid, stop sending reminders
+    if ($payment_status === 'Paid') {
+        return; // Don't send reminder if invoice is paid
+    }
+
+    // Send the reminder email
+    $subject = 'Reminder: Your Booking Invoice – ' . $invoice_number;
+    $message = "
+    <html>
+    <body>
+        <p>Dear Customer,</p>
+        <p>This is a reminder for your booking invoice.</p>
+        <p><strong>Invoice Number:</strong> $invoice_number</p>
+        <p><a href='$invoice_url'>View Your Invoice</a></p>
+        <p>Best regards,<br>Makerspace Team</p>
+    </body>
+    </html>";
+
+    $headers = array('Content-Type: text/html; charset=UTF-8');
+    wp_mail($customer_email, $subject, $message, $headers);
+
+    // Schedule the next reminder check 3 minutes later if the invoice is still unpaid
+    wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url));
+}
+
+// Hook the function to the scheduled event
+add_action('check_and_send_reminder_email', 'check_and_send_reminder_email', 10, 3);
 
 // Send reminder email function
 function send_reminder_email($customer_email, $invoice_number, $invoice_url) {
