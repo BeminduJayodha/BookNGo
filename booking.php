@@ -1,7 +1,5 @@
 <?php   
 
-
-// Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -37,6 +35,7 @@ function booking_calendar_install() {
         date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         payment_slip VARCHAR(255).,
         payment_status VARCHAR(20) DEFAULT 'Pending',  // Added payment_status column
+        reminder_count INT DEFAULT 0,
         PRIMARY KEY (id),
         FOREIGN KEY (booking_id) REFERENCES $table_name(id) ON DELETE CASCADE
         ) $charset_collate;";
@@ -768,7 +767,7 @@ add_action('admin_menu', 'add_payment_page');
 
 
 
-function display_payment_page() { 
+function display_payment_page() {  
     global $wpdb;
 
     $invoices = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}booking_invoices");
@@ -780,18 +779,30 @@ function display_payment_page() {
 
     echo '<h2>Invoice Details</h2>';
 
-    // Table styles and form start
     echo '<form method="post" enctype="multipart/form-data">';
     echo '<style>
-        .upload-button {
-            cursor: pointer;
-            display: inline-block;
-            margin-bottom: 5px;
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
         }
-        .upload-wrapper {
-            display: flex;
-            align-items: center;  /* Ensures buttons are aligned horizontally */
-            gap: 10px;  /* Adds space between the buttons */
+        .modal-content {
+            background-color: #fff;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            width: 40%;
+            box-shadow: 0px 0px 10px #000;
+        }
+        .close-modal {
+            float: right;
+            font-size: 20px;
+            cursor: pointer;
         }
     </style>';
 
@@ -803,59 +814,101 @@ function display_payment_page() {
                 <th>Booking Date(s)</th>
                 <th>Amount</th>
                 <th>Payment Status</th>
-                <th>Upload Payment Slip</th>
-                <th>Actions</th>
+                <th>Payment Slip</th>
             </tr>
         </thead>
         <tbody>';
 
-    foreach ($invoices as $invoice) {
-        $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
+foreach ($invoices as $invoice) {
+    $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
 
-        if ($booking) {
-            echo '<tr>';
-            echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
-            echo '<td>' . esc_html($booking->customer_name) . '</td>';
-            echo '<td>' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
-            echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
+    if ($booking) {
+        echo '<tr>';
+        echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
+        echo '<td>' . esc_html($booking->customer_name) . '</td>';
+        echo '<td>' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
+        echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
 
-            $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
-            echo '<td>' . $payment_status . '</td>';
+        $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
+        echo '<td>' . $payment_status . '</td>';
 
-            // Upload section
-            echo '<td>';
-            if (!empty($invoice->payment_slip)) {
-                echo '<a href="' . esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) . '" target="_blank"><span class="dashicons dashicons-visibility"></span> View Slip</a>';
-            } else {
-                $input_id = 'payment_slip_' . esc_attr($invoice->id);
-                echo '<div class="upload-wrapper">';
-                echo '<input type="file" name="' . $input_id . '" id="' . $input_id . '" style="display:none;">';
-                echo '<label for="' . $input_id . '" class="button upload-button"><span class="dashicons dashicons-paperclip"></span> Upload</label>';
-                echo '<button class="button" name="upload_slip_' . esc_attr($invoice->id) . '"><span class="dashicons dashicons-upload"></span> Submit</button>';
-                echo '</div>';
-            }
-            echo '</td>';
+        // Check if payment slip exists and display the appropriate button or link
+        if (!empty($invoice->payment_slip)) {
+            // If payment slip exists, show the View Slip link
+            echo '<td><a href="' . esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) . '" target="_blank"><span class="dashicons dashicons-visibility"></span> View Slip</a></td>';
+        } else {
+            // If payment slip doesn't exist, show the Upload Slip button
+            echo '<td><button type="button" class="button upload-slip" data-id="' . esc_attr($invoice->id) . '">
+        <span class="dashicons dashicons-upload"></span> Upload Slip
+      </button></td>';
 
-            echo '<td><button class="button download-pdf" data-invoice-number="' . esc_attr($invoice->invoice_number) . '">View Invoice</button></td>';
-            echo '</tr>';
         }
+        
+        echo '</tr>';
     }
+}
+
 
     echo '</tbody></table></form>';
 
+    // Upload Slip Modal
+    echo '<div id="uploadModal" class="modal">
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h2>Upload Payment Slip</h2>
+                <form id="uploadSlipForm" method="post" enctype="multipart/form-data">
+    <input type="hidden" id="invoice_id" name="invoice_id">
+    <label for="payment_slip">Select Payment Slip:</label>
+    <input type="file" name="payment_slip" id="payment_slip">
+    <br><br>
+    <button type="submit" name="upload_slip" class="button button-primary">Submit</button>
+</form>
+
+            </div>
+        </div>';
+
     handle_payment_slip_upload($invoices);
+
+    echo '<script>
+        document.addEventListener("DOMContentLoaded", function () {
+    var modal = document.getElementById("uploadModal");
+    var closeModal = document.querySelector(".close-modal");
+    var uploadButtons = document.querySelectorAll(".upload-slip");
+
+    uploadButtons.forEach(button => {
+        button.addEventListener("click", function () {
+            document.getElementById("invoice_id").value = this.dataset.id;
+            modal.style.display = "block";
+        });
+    });
+
+    closeModal.addEventListener("click", function () {
+        modal.style.display = "none";
+    });
+
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    };
+});
+
+    </script>';
 }
 
-function handle_payment_slip_upload($invoices) {
+
+
+function handle_payment_slip_upload() {
     global $wpdb;
 
-    foreach ($invoices as $invoice) {
-        $upload_field = 'payment_slip_' . $invoice->id;
-        $submit_field = 'upload_slip_' . $invoice->id;
+    // Check if the form is submitted
+    if (isset($_POST['upload_slip']) && isset($_FILES['payment_slip'])) {
+        $invoice_id = intval($_POST['invoice_id']); // Get invoice ID
+        $file = $_FILES['payment_slip']; // Get uploaded file
 
-        if (isset($_POST[$submit_field]) && isset($_FILES[$upload_field]) && !empty($_FILES[$upload_field]['name'])) {
-            $file = $_FILES[$upload_field];
-
+        // Check if a file was uploaded
+        if (!empty($file['name'])) {
+            // Handle file upload
             require_once(ABSPATH . 'wp-admin/includes/file.php');
             require_once(ABSPATH . 'wp-admin/includes/media.php');
             require_once(ABSPATH . 'wp-admin/includes/image.php');
@@ -866,25 +919,26 @@ function handle_payment_slip_upload($invoices) {
             if ($movefile && !isset($movefile['error'])) {
                 $file_url = str_replace(wp_upload_dir()['baseurl'] . '/', '', $movefile['url']);
 
+                // Update database with payment slip and status
                 $wpdb->update(
                     "{$wpdb->prefix}booking_invoices",
                     array(
                         'payment_slip' => $file_url,
                         'payment_status' => 'Paid'  // Update payment status to Paid
                     ),
-                    array('id' => $invoice->id)
-                    );
+                    array('id' => $invoice_id)
+                );
 
-
-                // Redirect to the same page to show "View Slip"
+                // Redirect to the same page to show the updated status
                 wp_redirect($_SERVER['REQUEST_URI']);
                 exit;
             } else {
-                echo '<div class="notice notice-error"><p>Error uploading payment slip for Invoice #' . esc_html($invoice->invoice_number) . ': ' . esc_html($movefile['error']) . '</p></div>';
+                echo '<div class="notice notice-error"><p>Error uploading payment slip: ' . esc_html($movefile['error']) . '</p></div>';
             }
         }
     }
 }
+
 
 
 
@@ -1314,13 +1368,26 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
         return; // Don't send reminder if invoice is paid
     }
 
+    // Get the current reminder count
+    $reminder_count = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT reminder_count FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1",
+            $invoice_number
+        )
+    );
+
+    // If the reminder count is 3 or more, stop sending reminders
+    if ($reminder_count >= 3) {
+        return; // Don't send more than 3 reminders
+    }
+
     // Send the reminder email
     $subject = 'Reminder: Your Booking Invoice – ' . $invoice_number;
     $message = "
     <html>
     <body>
         <p>Dear Customer,</p>
-        <p>This is a reminder for your booking invoice.</p>
+        <p>This is reminder #" . ($reminder_count + 1) . " for your booking invoice.</p>
         <p><strong>Invoice Number:</strong> $invoice_number</p>
         <p><a href='$invoice_url'>View Your Invoice</a></p>
         <p>Best regards,<br>Makerspace Team</p>
@@ -1330,9 +1397,18 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
     $headers = array('Content-Type: text/html; charset=UTF-8');
     wp_mail($customer_email, $subject, $message, $headers);
 
+    // Increment the reminder count
+    $wpdb->update(
+        $wpdb->prefix . 'booking_invoices',
+        array('reminder_count' => $reminder_count + 1),
+        array('invoice_number' => $invoice_number)
+    );
+
     // Schedule the next reminder check 3 minutes later if the invoice is still unpaid
     wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url));
 }
+
+
 
 // Hook the function to the scheduled event
 add_action('check_and_send_reminder_email', 'check_and_send_reminder_email', 10, 3);
