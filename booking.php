@@ -1,5 +1,7 @@
 <?php   
 
+
+// Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
 }
@@ -1376,11 +1378,6 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
         )
     );
 
-    // If the reminder count is 3 or more, stop sending reminders
-    if ($reminder_count >= 3) {
-        return; // Don't send more than 3 reminders
-    }
-
     // Send the reminder email
     $subject = 'Reminder: Your Booking Invoice – ' . $invoice_number;
     $message = "
@@ -1404,14 +1401,16 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
         array('invoice_number' => $invoice_number)
     );
 
-    // Schedule the next reminder check 3 minutes later if the invoice is still unpaid
-    wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url));
+    // Check if there's an existing scheduled event to prevent duplicates
+    if (!wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url))) {
+        // Schedule the next reminder check 3 minutes later if the invoice is still unpaid
+        wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url));
+    }
 }
-
-
 
 // Hook the function to the scheduled event
 add_action('check_and_send_reminder_email', 'check_and_send_reminder_email', 10, 3);
+
 
 // Send reminder email function
 function send_reminder_email($customer_email, $invoice_number, $invoice_url) {
