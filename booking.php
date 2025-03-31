@@ -1,6 +1,5 @@
 <?php   
 
-
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -51,6 +50,7 @@ function booking_calendar_install() {
         customer_phone VARCHAR(20) NOT NULL,
         customer_image TEXT;
         date_registered TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_restricted TINYINT(1) DEFAULT 0,
         PRIMARY KEY (id)
     ) $charset_collate;";
 
@@ -900,7 +900,7 @@ foreach ($invoices as $invoice) {
 
 
 
-function handle_payment_slip_upload() {
+function handle_payment_slip_upload() { 
     global $wpdb;
 
     // Check if the form is submitted
@@ -931,6 +931,25 @@ function handle_payment_slip_upload() {
                     array('id' => $invoice_id)
                 );
 
+                // Retrieve customer email from the invoice
+                $customer_email = $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT customer_email FROM {$wpdb->prefix}booking_customers 
+                         WHERE customer_email = (SELECT customer_email FROM {$wpdb->prefix}booking_invoices WHERE id = %d LIMIT 1) 
+                         LIMIT 1",
+                        $invoice_id
+                    )
+                );
+
+                // If customer exists, reset restriction
+                if ($customer_email) {
+                    $wpdb->update(
+                        "{$wpdb->prefix}booking_customers",
+                        array('is_restricted' => 0), // Reset restriction
+                        array('customer_email' => $customer_email)
+                    );
+                }
+
                 // Redirect to the same page to show the updated status
                 wp_redirect($_SERVER['REQUEST_URI']);
                 exit;
@@ -940,6 +959,7 @@ function handle_payment_slip_upload() {
         }
     }
 }
+
 
 
 
@@ -1120,7 +1140,7 @@ register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
 
 
-function save_booking() {
+function save_booking() { 
     global $wpdb;
 
     // Get data from the AJAX request
@@ -1130,6 +1150,27 @@ function save_booking() {
     $start_date = sanitize_text_field($_POST['start_date']); 
     $end_date = sanitize_text_field($_POST['end_date']);
     $booking_type = sanitize_text_field($_POST['booking_type']);
+
+    // Get customer email from wp_booking_customers table
+    $customer_email = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
+            $customer_name
+        )
+    );
+
+    // Check if the customer is restricted
+    $is_restricted = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT is_restricted FROM {$wpdb->prefix}booking_customers WHERE customer_email = %s LIMIT 1",
+            $customer_email
+        )
+    );
+
+    if ($is_restricted == 1) {
+        wp_send_json_error(['message' => 'Booking is restricted for this customer due to unpaid invoices.']);
+        return;
+    }
 
     // Convert dates to DateTime objects
     $start_date_obj = new DateTime($start_date);
@@ -1243,34 +1284,24 @@ function save_booking() {
 
         $invoice_counter++;
 
-        // Get customer email from wp_booking_customers table
-        $customer_email = $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
-                $customer_name
-            )
-        );
+        // Send invoice emails and schedule reminder checks
+        if ($customer_email && $delay_counter == 0) {
+            send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
 
-// Send invoice emails and schedule reminder checks
-if ($customer_email && $delay_counter == 0) {
-    send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
+            // Schedule reminder email 3 minutes after the first invoice email
+            wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
+        }
 
-    // Schedule reminder email 3 minutes after the first invoice email
-    wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
-}
+        // Schedule subsequent invoice emails with a delay
+        if ($customer_email && $delay_counter > 0) {
+            wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
-// Schedule subsequent invoice emails with a delay
-if ($customer_email && $delay_counter > 0) {
-    wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
+            // Schedule reminder email 3 minutes after the subsequent invoice email is sent
+            wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
+        }
 
-    // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-    wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
-}
-
-// Increment delay by 2 minutes (120 seconds) for each subsequent email
-$delay_counter += 2 * 60; // 2 minutes (120 seconds)
-
-
+        // Increment delay by 2 minutes (120 seconds) for each subsequent email
+        $delay_counter += 2 * 60; // 2 minutes (120 seconds)
     }
 
     // Update the invoice counter in options
@@ -1286,6 +1317,7 @@ $delay_counter += 2 * 60; // 2 minutes (120 seconds)
 }
 
 add_action('wp_ajax_save_booking', 'save_booking');
+
 
 // Send invoice email function
 function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates) {
@@ -1353,8 +1385,7 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
     wp_mail($customer_email, $subject, $message, $headers);
 }
 
-// Function to check payment status and send reminder email
-function check_and_send_reminder_email($customer_email, $invoice_number, $invoice_url) {
+function check_and_send_reminder_email($customer_email, $invoice_number, $invoice_url) {   
     global $wpdb;
 
     // Get payment status for this specific invoice
@@ -1367,11 +1398,11 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
 
     // If the invoice is paid, stop sending reminders
     if ($payment_status === 'Paid') {
-        return; // Don't send reminder if invoice is paid
+        return;
     }
 
     // Get the current reminder count
-    $reminder_count = $wpdb->get_var(
+    $reminder_count = (int) $wpdb->get_var(
         $wpdb->prepare(
             "SELECT reminder_count FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1",
             $invoice_number
@@ -1387,6 +1418,7 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
         <p>This is reminder #" . ($reminder_count + 1) . " for your booking invoice.</p>
         <p><strong>Invoice Number:</strong> $invoice_number</p>
         <p><a href='$invoice_url'>View Your Invoice</a></p>
+        <p>Please make the payment to avoid booking restrictions.</p>
         <p>Best regards,<br>Makerspace Team</p>
     </body>
     </html>";
@@ -1397,19 +1429,31 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
     // Increment the reminder count
     $wpdb->update(
         $wpdb->prefix . 'booking_invoices',
-        array('reminder_count' => $reminder_count + 1),
+        array('reminder_count' => $reminder_count + 1), // Increment the reminder count
         array('invoice_number' => $invoice_number)
     );
 
-    // Check if there's an existing scheduled event to prevent duplicates
-    if (!wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url))) {
-        // Schedule the next reminder check 3 minutes later if the invoice is still unpaid
+    // Check if this is the 3rd reminder, and restrict the customer **AFTER** sending the email
+    if ($reminder_count + 1 >= 3) {
+        $wpdb->update(
+            $wpdb->prefix . 'booking_customers',
+            array('is_restricted' => 1), // Set is_restricted to 1
+            array('customer_email' => $customer_email)
+        );
+        return; // Stop further scheduling after the 3rd reminder
+    }
+
+    // Ensure there's no duplicate scheduling for reminders if reminder count is less than 3
+    if ($reminder_count + 1 < 3 && !wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url))) {
+        // Schedule the next reminder in 3 minutes
         wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url));
     }
 }
 
 // Hook the function to the scheduled event
 add_action('check_and_send_reminder_email', 'check_and_send_reminder_email', 10, 3);
+
+
 
 
 // Send reminder email function
@@ -1710,7 +1754,7 @@ function display_month_view($bookings, $current_month, $current_year) {
     $previous_month_day = date('t', strtotime("{$current_year}-" . ($current_month - 1) . "-01")) - $start_day + 2; // Start from the day before the first of the month
     $next_month_days = 1; // Start from 1 for next month days
 
-    for ($row = 1; $row <= 5; $row++) { // Assuming 5 weeks per month
+    for ($row = 1; $row <= 6; $row++) { // Assuming 5 weeks per month
         echo '<tr>';
         for ($day = 1; $day <= 7; $day++) {
             $current_cell_date = sprintf('%04d-%02d-%02d', $current_year, $current_month, $current_day);
@@ -2369,20 +2413,22 @@ function updateStartEndTime() {
         });
 
         jQuery(document).ready(function ($) {
-            $('#bookingForm').submit(function (e) {
-                e.preventDefault();
+    $('#bookingForm').submit(function (e) {
+        e.preventDefault();
 
-                var formData = $(this).serialize();
+        var formData = $(this).serialize();
 
-                $.post(ajaxurl, formData + '&action=save_booking', function (response) {
-                    if (response.success) {
-                        window.location.href = response.data.redirect_url;
-                    } else {
-                        alert('Time slot is already booked for this date. Please choose available time slots.');
-                    }
-                });
-            });
+        $.post(ajaxurl, formData + '&action=save_booking', function (response) {
+            if (response.success) {
+                window.location.href = response.data.redirect_url;
+            } else {
+                // Display the actual error message from the server
+                alert(response.data.message);
+            }
         });
+    });
+});
+
     </script>
     <?php
 }
