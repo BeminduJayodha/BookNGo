@@ -1320,47 +1320,89 @@ add_action('wp_ajax_save_booking', 'save_booking');
 
 
 // Send invoice email function
-function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates) {
-    $formatted_start = reset($dates); // First date of the month
-    $formatted_end = end($dates);     // Last date of the month
+// Include the FPDF library
+require_once( plugin_dir_path( __FILE__ ) . 'fpdf/fpdf.php'); // Correct path to fpdf library
 
-    $subject = 'Your Booking Invoice – ' . date('F Y', strtotime($formatted_start));
+function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates) {
+    $pdf = new FPDF();
+    $pdf->AddPage();
+    
+    // Invoice Title (Top-right corner)
+    $pdf->SetFont('Helvetica', 'B', 20);
+    $pdf->SetXY(160, 10);
+    $pdf->Cell(40, 10, 'INVOICE');
+
+    // Company Name
+    $pdf->SetXY(20, 30);
+    $pdf->SetFont('Helvetica', 'B', 16);
+    $pdf->Cell(0, 10, 'Lankatronics Pvt Ltd', 0, 1);
+
+    // Invoice Date (Top-right)
+    $today = date('Y-m-d');
+    $pdf->SetFont('Helvetica', '', 11);
+    $pdf->SetXY(150, 30);
+    $pdf->Cell(0, 10, 'Invoice Date: ' . $today, 0, 1, 'R');
+
+    // Company Address
+    $pdf->SetFont('Helvetica', '', 11);
+    $pdf->SetXY(20, 45);
+    $pdf->MultiCell(0, 6, "No. 8, 1/3, Sunethradevi Road,\nKohuwala, Nugegoda, Sri Lanka\nPhone: 077 5678 000\nEmail: info@lankatronics.lk", 0);
+
+    // Invoice Number
+    $pdf->SetXY(20, 75);
+    $pdf->SetFont('Helvetica', '', 12);
+    $pdf->Cell(0, 10, 'Invoice Number: #' . $invoice_number, 0, 1);
+
+    // Customer Info
+    $pdf->SetXY(20, 100); // Set position for title
+    $pdf->SetFont('Helvetica', 'B', 12);
+    $pdf->Cell(50, 10, 'Customer Information', 0, 1); // Define a fixed width (50)
+    
+    $pdf->SetXY(20, 110); // Set position for the next line
+    $pdf->SetFont('Helvetica', '', 12);
+    $pdf->Cell(50, 10, 'Name: ' . $customer_name, 0, 1); // Use the same fixed width
+
+
+    // Booking Details Table
+    $pdf->Ln(8);
+    $pdf->SetFont('Helvetica', 'B', 12);
+    $pdf->Cell(0, 10, 'Booking Details', 0, 1);
+    
+    // Table Header
+    $pdf->SetFont('Helvetica', 'B', 10);
+    $pdf->SetFillColor(200, 200, 200);
+    $pdf->Cell(60, 10, 'Booking Type', 1, 0, 'C', true);
+    $pdf->Cell(60, 10, 'Start to End Date', 1, 0, 'C', true);
+    $pdf->Cell(60, 10, 'Total Amount', 1, 1, 'C', true);
+
+    // Table Content (Dynamic Row)
+    $pdf->SetFont('Helvetica', '', 10);
+    $pdf->Cell(60, 10, 'Class Rent', 1, 0, 'C');
+    $pdf->Cell(60, 10, reset($dates) . ' to ' . end($dates), 1, 0, 'C');
+    $pdf->Cell(60, 10, 'Rs. ' . $amount, 1, 1, 'C');
+
+    // Footer
+    $pdf->Ln(15);
+    $pdf->SetFont('Helvetica', 'I', 10);
+    $pdf->Cell(0, 10, 'Thank you for your booking!', 0, 1, 'C');
+    $pdf->Cell(0, 10, 'Visit us at: www.lankatronics.lk', 0, 1, 'C');
+
+    // Save PDF and Send Email
+    $upload_dir = wp_upload_dir();
+    $temp_file = $upload_dir['path'] . '/Invoice-' . $invoice_number . '.pdf';
+    $pdf->Output('F', $temp_file);
+
+    // Email
+    $subject = 'Your Booking Invoice – ' . date('F Y', strtotime(reset($dates)));
     $message = "
     <html>
     <head>
         <style>
-            body {
-                font-family: Arial, sans-serif;
-                background-color: #f4f4f4;
-                padding: 20px;
-            }
-            .email-container {
-                background-color: #ffffff;
-                padding: 20px;
-                border-radius: 8px;
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            }
-            .email-header {
-                font-size: 24px;
-                color: #333333;
-                margin-bottom: 20px;
-            }
-            .email-body {
-                font-size: 16px;
-                color: #555555;
-                margin-bottom: 20px;
-            }
-            .email-footer {
-                font-size: 14px;
-                color: #777777;
-                text-align: center;
-                margin-top: 20px;
-            }
-            .invoice-link {
-                font-size: 16px;
-                color: #007bff;
-                text-decoration: none;
-            }
+            body { font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
+            .email-container { background-color: #ffffff; padding: 20px; border-radius: 8px; }
+            .email-header { font-size: 24px; color: #333; }
+            .email-body { font-size: 16px; color: #555; }
+            .email-footer { font-size: 14px; color: #777; text-align: center; margin-top: 20px; }
         </style>
     </head>
     <body>
@@ -1370,20 +1412,21 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
                 <p>Thank you for your booking.</p>
                 <p><strong>Invoice Number:</strong> $invoice_number</p>
                 <p><strong>Amount:</strong> Rs. $amount</p>
-                <p><strong>Booking Period:</strong> $formatted_start to $formatted_end</p>
-                <p>You can view your invoice by clicking the link below:</p>
-                <p><a href='$invoice_urls[0]' class='invoice-link'>View Your Invoice</a></p>
+                <p><strong>Booking Period:</strong> " . reset($dates) . " to " . end($dates) . "</p>
+                <p>You can download your invoice by clicking the attachment below:</p>
             </div>
-            <div class='email-footer'>
-                <p>Best regards,<br>Makerspace Team</p>
-            </div>
+            <div class='email-footer'>Best regards,<br>Makerspace Team</div>
         </div>
     </body>
     </html>";
 
     $headers = array('Content-Type: text/html; charset=UTF-8');
-    wp_mail($customer_email, $subject, $message, $headers);
+    wp_mail($customer_email, $subject, $message, $headers, array($temp_file));
+
+    unlink($temp_file);
 }
+
+
 
 function check_and_send_reminder_email($customer_email, $invoice_number, $invoice_url) {   
     global $wpdb;
@@ -1408,23 +1451,94 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
             $invoice_number
         )
     );
+require_once(plugin_dir_path(__FILE__) . 'fpdf/fpdf.php');
+$pdf = new FPDF();
+$pdf->AddPage();
 
-    // Send the reminder email
-    $subject = 'Reminder: Your Booking Invoice – ' . $invoice_number;
-    $message = "
-    <html>
-    <body>
-        <p>Dear Customer,</p>
-        <p>This is reminder #" . ($reminder_count + 1) . " for your booking invoice.</p>
-        <p><strong>Invoice Number:</strong> $invoice_number</p>
-        <p><a href='$invoice_url'>View Your Invoice</a></p>
-        <p>Please make the payment to avoid booking restrictions.</p>
-        <p>Best regards,<br>Makerspace Team</p>
-    </body>
-    </html>";
+// Invoice Title (Top-right corner)
+$pdf->SetFont('Helvetica', 'B', 20);
+$pdf->SetXY(160, 10);
+$pdf->Cell(40, 10, 'INVOICE');
 
-    $headers = array('Content-Type: text/html; charset=UTF-8');
-    wp_mail($customer_email, $subject, $message, $headers);
+// Company Name
+$pdf->SetXY(20, 30);
+$pdf->SetFont('Helvetica', 'B', 16);
+$pdf->Cell(0, 10, 'Lankatronics Pvt Ltd', 0, 1);
+
+// Invoice Date (Top-right)
+$today = date('Y-m-d');
+$pdf->SetFont('Helvetica', '', 11);
+$pdf->SetXY(150, 30);
+$pdf->Cell(0, 10, 'Invoice Date: ' . $today, 0, 1, 'R');
+
+// Company Address
+$pdf->SetFont('Helvetica', '', 11);
+$pdf->SetXY(20, 45);
+$pdf->MultiCell(0, 6, "No. 8, 1/3, Sunethradevi Road,\nKohuwala, Nugegoda, Sri Lanka\nPhone: 077 5678 000\nEmail: info@lankatronics.lk", 0);
+
+// Invoice Number
+$pdf->SetXY(20, 75);
+$pdf->SetFont('Helvetica', '', 12);
+$pdf->Cell(0, 10, 'Invoice Number: #' . $invoice_number, 0, 1);
+
+// Customer Info
+$pdf->SetXY(20, 100);
+$pdf->SetFont('Helvetica', 'B', 12);
+$pdf->Cell(50, 10, 'Customer Information', 0, 1);
+$pdf->SetXY(20, 110);
+$pdf->SetFont('Helvetica', '', 12);
+$pdf->Cell(50, 10, 'Name: ' . $customer_name, 0, 1);
+
+// Booking Details Table
+$pdf->Ln(8);
+$pdf->SetFont('Helvetica', 'B', 12);
+$pdf->Cell(0, 10, 'Booking Details', 0, 1);
+
+// Table Header
+$pdf->SetFont('Helvetica', 'B', 10);
+$pdf->SetFillColor(200, 200, 200);
+$pdf->Cell(60, 10, 'Booking Type', 1, 0, 'C', true);
+$pdf->Cell(60, 10, 'Start to End Date', 1, 0, 'C', true);
+$pdf->Cell(60, 10, 'Total Amount', 1, 1, 'C', true);
+
+// Table Content (Dynamic Row)
+$pdf->SetFont('Helvetica', '', 10);
+$pdf->Cell(60, 10, $booking_type, 1, 0, 'C');
+$pdf->Cell(60, 10, $start_date . ' to ' . $end_date, 1, 0, 'C');
+$pdf->Cell(60, 10, 'Rs. ' . $amount, 1, 1, 'C');
+
+// Footer
+$pdf->Ln(15);
+$pdf->SetFont('Helvetica', 'I', 10);
+$pdf->Cell(0, 10, 'Thank you for your booking!', 0, 1, 'C');
+$pdf->Cell(0, 10, 'Visit us at: www.lankatronics.lk', 0, 1, 'C');
+
+// Save PDF and Send Email
+$upload_dir = wp_upload_dir();
+$temp_file = $upload_dir['path'] . '/Invoice-' . $invoice_number . '.pdf';
+$pdf->Output('F', $temp_file);
+
+// Send the reminder email with attachment
+$subject = 'Reminder: Your Booking Invoice – ' . $invoice_number;
+$message = "
+<html>
+<body>
+    <p>Dear Customer,</p>
+    <p>This is reminder #" . ($reminder_count + 1) . " for your booking invoice.</p>
+    <p><strong>Invoice Number:</strong> $invoice_number</p>
+    <p><a href='$invoice_url'>View Your Invoice</a></p>
+    <p>Please make the payment to avoid booking restrictions.</p>
+    <p>Best regards,<br>Makerspace Team</p>
+</body>
+</html>";
+
+$headers = array('Content-Type: text/html; charset=UTF-8');
+$attachments = array($temp_file);
+wp_mail($customer_email, $subject, $message, $headers, $attachments);
+
+// Delete the file after sending
+unlink($temp_file);
+
 
     // Increment the reminder count
     $wpdb->update(
