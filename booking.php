@@ -82,14 +82,37 @@ add_action('admin_enqueue_scripts', 'booking_calendar_enqueue_scripts');
 
 // Admin menu for booking calendar
 function booking_calendar_menu() {
-    add_menu_page('Booking Calendar', 'Booking Calendar', 'manage_options', 'booking-calendar', 'booking_calendar_page');
-    
-    // Add submenu for Customer Registration
-    add_submenu_page('booking-calendar', 'Customer Registration', 'Customer Registration', 'manage_options', 'customer-registration', 'customer_registration_page');
-    add_submenu_page('booking-calendar', 'Customer List', 'Customer List', 'manage_options', 'customer-list', 'customer_list_page');
-    add_submenu_page('booking-calendar', 'Customer Edit', 'Customer Edit', 'manage_options', 'customer-edit', 'customer_edit_page');
+    add_menu_page(
+        'Booking Calendar', 
+        'Booking Calendar', 
+        'edit_pages',  // Editors can access
+        'booking-calendar', 
+        'booking_calendar_page', 
+        'dashicons-calendar-alt'
+    );
+
+    // Add submenus (Editors can access)
+    add_submenu_page('booking-calendar', 'Customer Registration', 'Customer Registration', 'edit_pages', 'customer-registration', 'customer_registration_page');
+    add_submenu_page('booking-calendar', 'Customer List', 'Customer List', 'edit_pages', 'customer-list', 'customer_list_page');
+    add_submenu_page('booking-calendar', 'Customer Edit', 'Customer Edit', 'edit_pages', 'customer-edit', 'customer_edit_page');
+    add_submenu_page('booking-calendar', 'View Invoice', 'View Invoice', 'edit_pages', 'view-invoice', 'display_invoice_page');
+    add_submenu_page('booking-calendar', 'View Payment', 'View Payment', 'edit_pages', 'view-payment', 'display_payment_page');
 }
 add_action('admin_menu', 'booking_calendar_menu');
+function restrict_dashboard_for_editors() {
+    if (current_user_can('editor')) { // Apply only for Editors
+        global $menu;
+        $allowed_menus = ['booking-calendar']; // Allow only Booking Calendar Plugin
+
+        foreach ($menu as $key => $item) {
+            if (!in_array($item[2], $allowed_menus)) {
+                unset($menu[$key]); // Remove all other menus
+            }
+        }
+    }
+}
+add_action('admin_menu', 'restrict_dashboard_for_editors', 999);
+
 
 function customer_registration_page() {
     ?>
@@ -576,10 +599,10 @@ function customer_edit_page() {
 
 
 
-function add_invoice_page() {
-    add_submenu_page('booking-calendar', 'View Invoice', 'View Invoice', 'manage_options', 'view-invoice', 'display_invoice_page');
-}
-add_action('admin_menu', 'add_invoice_page');
+//function add_invoice_page() {
+//    add_submenu_page('booking-calendar', 'View Invoice', 'View Invoice', 'manage_options', 'view-invoice', 'display_invoice_page');
+//}
+//add_action('admin_menu', 'add_invoice_page');
 
 
 add_action('admin_enqueue_scripts', 'enqueue_jspdf_script');
@@ -755,17 +778,17 @@ function add_pdf_download_script() {
     </script>
     <?php
 }
-function add_payment_page() {
-    add_submenu_page(
-        'booking-calendar',        // Parent menu slug (same as 'booking-calendar' or whatever your parent menu is)
-        'View Payment',            // Page title
-        'View Payment',            // Menu title
-        'manage_options',          // Capability required to access this menu
-        'view-payment',            // Slug for the new submenu page
-        'display_payment_page'     // Function that will display the content of the page
-    );
-}
-add_action('admin_menu', 'add_payment_page');
+//function add_payment_page() {
+//    add_submenu_page(
+//        'booking-calendar',        // Parent menu slug (same as 'booking-calendar' or whatever your parent menu is)
+//        'View Payment',            // Page title
+//        'View Payment',            // Menu title
+//        'manage_options',          // Capability required to access this menu
+//        'view-payment',            // Slug for the new submenu page
+//        'display_payment_page'     // Function that will display the content of the page
+//    );
+//}
+//add_action('admin_menu', 'add_payment_page');
 
 
 
