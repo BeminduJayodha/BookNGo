@@ -1312,7 +1312,7 @@ function save_booking() {
             send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
 
             // Schedule reminder email 3 minutes after the first invoice email
-            wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
+            wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Schedule subsequent invoice emails with a delay
@@ -1320,7 +1320,7 @@ function save_booking() {
             wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
             // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-            wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0]));
+            wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Increment delay by 2 minutes (120 seconds) for each subsequent email
@@ -1402,7 +1402,7 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
     $pdf->SetFont('Helvetica', '', 10);
     $pdf->Cell(60, 10, 'Class Rent', 1, 0, 'C');
     $pdf->Cell(60, 10, reset($dates) . ' to ' . end($dates), 1, 0, 'C');
-    $pdf->Cell(60, 10, 'Rs. ' . $amount, 1, 1, 'C');
+    $pdf->Cell(60, 10, 'Rs. ' . number_format((float)$amount, 2), 1, 1, 'C');
 
     // Footer
     $pdf->Ln(15);
@@ -1451,10 +1451,10 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
 
 
 
-function check_and_send_reminder_email($customer_email, $invoice_number, $invoice_url) {   
+function check_and_send_reminder_email($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount) {
     global $wpdb;
 
-    // Get payment status for this specific invoice
+    // Get payment status for this invoice
     $payment_status = $wpdb->get_var(
         $wpdb->prepare(
             "SELECT payment_status FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1",
@@ -1462,133 +1462,138 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
         )
     );
 
-    // If the invoice is paid, stop sending reminders
+    // Stop if invoice is paid
     if ($payment_status === 'Paid') {
         return;
     }
 
-    // Get the current reminder count
+    // Get current reminder count
     $reminder_count = (int) $wpdb->get_var(
         $wpdb->prepare(
             "SELECT reminder_count FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1",
             $invoice_number
         )
     );
-require_once(plugin_dir_path(__FILE__) . 'fpdf/fpdf.php');
-$pdf = new FPDF();
-$pdf->AddPage();
 
-// Invoice Title (Top-right corner)
-$pdf->SetFont('Helvetica', 'B', 20);
-$pdf->SetXY(160, 10);
-$pdf->Cell(40, 10, 'INVOICE');
+    require_once(plugin_dir_path(__FILE__) . 'fpdf/fpdf.php');
+    $pdf = new FPDF();
+    $pdf->AddPage();
 
-// Company Name
-$pdf->SetXY(20, 30);
-$pdf->SetFont('Helvetica', 'B', 16);
-$pdf->Cell(0, 10, 'Lankatronics Pvt Ltd', 0, 1);
+    // Invoice Title (Top-right)
+    $pdf->SetFont('Helvetica', 'B', 20);
+    $pdf->SetXY(160, 10);
+    $pdf->Cell(40, 10, 'INVOICE');
 
-// Invoice Date (Top-right)
-$today = date('Y-m-d');
-$pdf->SetFont('Helvetica', '', 11);
-$pdf->SetXY(150, 30);
-$pdf->Cell(0, 10, 'Invoice Date: ' . $today, 0, 1, 'R');
+    // Company Name
+    $pdf->SetXY(20, 30);
+    $pdf->SetFont('Helvetica', 'B', 16);
+    $pdf->Cell(0, 10, 'Lankatronics Pvt Ltd', 0, 1);
 
-// Company Address
-$pdf->SetFont('Helvetica', '', 11);
-$pdf->SetXY(20, 45);
-$pdf->MultiCell(0, 6, "No. 8, 1/3, Sunethradevi Road,\nKohuwala, Nugegoda, Sri Lanka\nPhone: 077 5678 000\nEmail: info@lankatronics.lk", 0);
+    // Invoice Date (Top-right)
+    $today = date('Y-m-d');
+    $pdf->SetFont('Helvetica', '', 11);
+    $pdf->SetXY(150, 30);
+    $pdf->Cell(0, 10, 'Invoice Date: ' . $today, 0, 1, 'R');
 
-// Invoice Number
-$pdf->SetXY(20, 75);
-$pdf->SetFont('Helvetica', '', 12);
-$pdf->Cell(0, 10, 'Invoice Number: #' . $invoice_number, 0, 1);
+    // Company Address
+    $pdf->SetFont('Helvetica', '', 11);
+    $pdf->SetXY(20, 45);
+    $pdf->MultiCell(0, 6, "No. 8, 1/3, Sunethradevi Road,\nKohuwala, Nugegoda, Sri Lanka\nPhone: 077 5678 000\nEmail: info@lankatronics.lk", 0);
 
-// Customer Info
-$pdf->SetXY(20, 100);
-$pdf->SetFont('Helvetica', 'B', 12);
-$pdf->Cell(50, 10, 'Customer Information', 0, 1);
-$pdf->SetXY(20, 110);
-$pdf->SetFont('Helvetica', '', 12);
-$pdf->Cell(50, 10, 'Name: ' . $customer_name, 0, 1);
+    // Invoice Number
+    $pdf->SetXY(20, 75);
+    $pdf->SetFont('Helvetica', '', 12);
+    $pdf->Cell(0, 10, 'Invoice Number: #' . $invoice_number, 0, 1);
 
-// Booking Details Table
-$pdf->Ln(8);
-$pdf->SetFont('Helvetica', 'B', 12);
-$pdf->Cell(0, 10, 'Booking Details', 0, 1);
+    // Customer Info
+    $pdf->SetXY(20, 100);
+    $pdf->SetFont('Helvetica', 'B', 12);
+    $pdf->Cell(50, 10, 'Customer Information', 0, 1);
+    $pdf->SetXY(20, 110);
+    $pdf->SetFont('Helvetica', '', 12);
+    $pdf->Cell(50, 10, 'Name: ' . $customer_name, 0, 1);
 
-// Table Header
-$pdf->SetFont('Helvetica', 'B', 10);
-$pdf->SetFillColor(200, 200, 200);
-$pdf->Cell(60, 10, 'Booking Type', 1, 0, 'C', true);
-$pdf->Cell(60, 10, 'Start to End Date', 1, 0, 'C', true);
-$pdf->Cell(60, 10, 'Total Amount', 1, 1, 'C', true);
+    // Booking Details Table
+    $pdf->Ln(8);
+    $pdf->SetFont('Helvetica', 'B', 12);
+    $pdf->Cell(0, 10, 'Booking Details', 0, 1);
 
-// Table Content (Dynamic Row)
-$pdf->SetFont('Helvetica', '', 10);
-$pdf->Cell(60, 10, $booking_type, 1, 0, 'C');
-$pdf->Cell(60, 10, $start_date . ' to ' . $end_date, 1, 0, 'C');
-$pdf->Cell(60, 10, 'Rs. ' . $amount, 1, 1, 'C');
+    // Table Header
+    $pdf->SetFont('Helvetica', 'B', 10);
+    $pdf->SetFillColor(200, 200, 200);
+    $pdf->Cell(60, 10, 'Booking Type', 1, 0, 'C', true);
+    $pdf->Cell(60, 10, 'Start to End Date', 1, 0, 'C', true);
+    $pdf->Cell(60, 10, 'Total Amount', 1, 1, 'C', true);
 
-// Footer
-$pdf->Ln(15);
-$pdf->SetFont('Helvetica', 'I', 10);
-$pdf->Cell(0, 10, 'Thank you for your booking!', 0, 1, 'C');
-$pdf->Cell(0, 10, 'Visit us at: www.lankatronics.lk', 0, 1, 'C');
+    // Table Content (Dynamic Row)
+    $pdf->SetFont('Helvetica', '', 10);
+    $pdf->Cell(60, 10, $booking_type, 1, 0, 'C');
+    $pdf->Cell(60, 10, $start_date . ' to ' . $end_date, 1, 0, 'C');
+    $pdf->Cell(60, 10, 'Rs. ' . $amount, 1, 1, 'C');
 
-// Save PDF and Send Email
-$upload_dir = wp_upload_dir();
-$temp_file = $upload_dir['path'] . '/Invoice-' . $invoice_number . '.pdf';
-$pdf->Output('F', $temp_file);
+    // Footer
+    $pdf->Ln(15);
+    $pdf->SetFont('Helvetica', 'I', 10);
+    $pdf->Cell(0, 10, 'Thank you for your booking!', 0, 1, 'C');
+    $pdf->Cell(0, 10, 'Visit us at: www.lankatronics.lk', 0, 1, 'C');
 
-// Send the reminder email with attachment
-$subject = 'Reminder: Your Booking Invoice – ' . $invoice_number;
-$message = "
-<html>
-<body>
-    <p>Dear Customer,</p>
-    <p>This is reminder #" . ($reminder_count + 1) . " for your booking invoice.</p>
-    <p><strong>Invoice Number:</strong> $invoice_number</p>
-    <p><a href='$invoice_url'>View Your Invoice</a></p>
-    <p>Please make the payment to avoid booking restrictions.</p>
-    <p>Best regards,<br>Makerspace Team</p>
-</body>
-</html>";
+    // Save PDF and Send Email
+    $upload_dir = wp_upload_dir();
+    $temp_file = $upload_dir['path'] . '/Invoice-' . $invoice_number . '.pdf';
+    $pdf->Output('F', $temp_file);
 
-$headers = array('Content-Type: text/html; charset=UTF-8');
-$attachments = array($temp_file);
-wp_mail($customer_email, $subject, $message, $headers, $attachments);
+    // Email Content
+    $subject = 'Reminder: Your Booking Invoice – ' . $invoice_number;
+    $message = "
+    <html>
+    <body>
+        <p>Dear $customer_name,</p>
+        <p>This is reminder #" . ($reminder_count + 1) . " for your booking invoice.</p>
+        <p><strong>Invoice Number:</strong> $invoice_number</p>
+        <p><a href='$invoice_url'>View Your Invoice</a></p>
+        <p>Please make the payment to avoid booking restrictions.</p>
+        <p>Best regards,<br>Makerspace Team</p>
+    </body>
+    </html>";
 
-// Delete the file after sending
-unlink($temp_file);
+    $headers = array('Content-Type: text/html; charset=UTF-8');
+    $attachments = array($temp_file);
+    $sent = wp_mail($customer_email, $subject, $message, $headers, $attachments);
 
+    // Delete the file after sending
+    unlink($temp_file);
+
+    // Log error if email fails
+    if (!$sent) {
+        error_log("Reminder email failed to send to $customer_email.");
+    }
 
     // Increment the reminder count
     $wpdb->update(
         $wpdb->prefix . 'booking_invoices',
-        array('reminder_count' => $reminder_count + 1), // Increment the reminder count
+        array('reminder_count' => $reminder_count + 1),
         array('invoice_number' => $invoice_number)
     );
 
-    // Check if this is the 3rd reminder, and restrict the customer **AFTER** sending the email
+    // Restrict the customer after the 3rd reminder
     if ($reminder_count + 1 >= 3) {
         $wpdb->update(
             $wpdb->prefix . 'booking_customers',
-            array('is_restricted' => 1), // Set is_restricted to 1
+            array('is_restricted' => 1),
             array('customer_email' => $customer_email)
         );
-        return; // Stop further scheduling after the 3rd reminder
+        return;
     }
 
-    // Ensure there's no duplicate scheduling for reminders if reminder count is less than 3
-    if ($reminder_count + 1 < 3 && !wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url))) {
-        // Schedule the next reminder in 3 minutes
-        wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url));
+    // Schedule next reminder if less than 3 have been sent
+    if ($reminder_count + 1 < 3 && !wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount))) {
+        wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
     }
 }
 
-// Hook the function to the scheduled event
-add_action('check_and_send_reminder_email', 'check_and_send_reminder_email', 10, 3);
+// Hook the function properly
+add_action('check_and_send_reminder_email', 'check_and_send_reminder_email', 10, 8);
+
 
 
 
@@ -1873,6 +1878,60 @@ function display_month_view($bookings, $current_month, $current_year) {
     foreach ($customers as $customer) {
         $customer_images[$customer->customer_name] = $customer->customer_image;
     }
+    // Include the JavaScript and CSS for the popup
+    echo '
+    <script>
+    function showBookingPopup(customerName, startTime, endTime, bookingType) {
+        document.getElementById("bookingPopup").style.display = "block";
+        document.getElementById("popupCustomerName").innerText = customerName;
+        document.getElementById("popupStartTime").innerText = startTime;
+        document.getElementById("popupEndTime").innerText = endTime;
+        document.getElementById("popupBookingType").innerText = bookingType;
+    }
+
+    function closeBookingPopup() {
+        document.getElementById("bookingPopup").style.display = "none";
+    }
+    </script>
+
+    <div id="bookingPopup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); background-color:white; padding:20px; box-shadow:0px 4px 6px rgba(0,0,0,0.1); border-radius:10px; z-index:1000;">
+        <h3>Booking Details</h3>
+        <p><strong>Customer:</strong> <span id="popupCustomerName"></span></p>
+        <p><strong>Start Time:</strong> <span id="popupStartTime"></span></p>
+        <p><strong>End Time:</strong> <span id="popupEndTime"></span></p>
+        <p><strong>Booking Type:</strong> <span id="popupBookingType"></span></p>
+        <button onclick="closeBookingPopup()">Close</button>
+    </div>
+
+    <style>
+    #bookingPopup {
+        background: white;
+        border: 2px solid #333;
+        padding: 20px;
+        width: 300px;
+        text-align: center;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        z-index: 1001;
+    }
+
+    #bookingPopup button {
+        background: red;
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 5px;
+    }
+
+    #bookingPopup button:hover {
+        background: darkred;
+    }
+    </style>';
     echo '<table class="booking-table" border="1" cellspacing="0" cellpadding="5" style="width:100%; text-align:center; border-collapse: collapse; table-layout: fixed;"> 
             <thead>
                 <tr>
@@ -1915,7 +1974,9 @@ function display_month_view($bookings, $current_month, $current_year) {
                     $booked_text_color = ($current_cell_date < $current_date) ? '#f0f0f1' : '#edebec'; // Gray for past, white for future/today
                     
 
-                    $booked_time_str .= '<div style="position: relative; background-color:' . esc_attr($booking->color) . '; color: ' . $booked_text_color . '; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center;">';
+                    $booked_time_str .= '<div onclick="showBookingPopup(\'' . esc_js($booking->customer_name) . '\', \'' . esc_js($booking->start_time) . '\', \'' . esc_js($booking->end_time) . '\', \'' . esc_js($booking->booking_type) . '\')" 
+    style="cursor: pointer; position: relative; background-color:' . esc_attr($booking->color) . '; color: ' . $booked_text_color . '; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center;">';
+
 
                     
                     // Icon in the top-left corner
@@ -1985,7 +2046,7 @@ if (!empty($booked_times_on_date)) {
                 if ($current_cell_date >= $current_date) {
                     if (!empty($bookings_on_date)) {
                         // Assuming that $booking->id is available as the unique identifier for each booking
-                        $onclick_event = "onclick=\"showBookingModal('{$current_cell_date}', '" . implode(',', $available_slots) . "')\"";
+                        $onclick_event = "onclick=\"if(event.target === this) showBookingModal('{$current_cell_date}', '" . implode(',', $available_slots) . "')\"";
                     } else {
                         $onclick_event = "onclick=\"showBookingModal('{$current_cell_date}', '')\"";
                     }
