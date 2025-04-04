@@ -792,12 +792,13 @@ function add_pdf_download_script() {
 
 
 
-function display_payment_page() {  
+function display_payment_page() {   
     global $wpdb;
 
-    $invoices = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}booking_invoices");
+    // Get unique invoice numbers
+    $invoice_numbers = $wpdb->get_results("SELECT DISTINCT invoice_number FROM {$wpdb->prefix}booking_invoices");
 
-    if (empty($invoices)) {
+    if (empty($invoice_numbers)) {
         echo '<h2>No invoices found.</h2>';
         return;
     }
@@ -844,35 +845,41 @@ function display_payment_page() {
         </thead>
         <tbody>';
 
-foreach ($invoices as $invoice) {
-    $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
+    // Loop through the unique invoice numbers
+    foreach ($invoice_numbers as $invoice_number) {
+        // Get the first invoice with the current invoice_number
+        $invoice = $wpdb->get_row(
+            $wpdb->prepare("SELECT * FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1", $invoice_number->invoice_number)
+        );
 
-    if ($booking) {
-        echo '<tr>';
-        echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
-        echo '<td>' . esc_html($booking->customer_name) . '</td>';
-        echo '<td>' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
-        echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
+        if ($invoice) {
+            $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
 
-        $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
-        echo '<td>' . $payment_status . '</td>';
+            if ($booking) {
+                echo '<tr>';
+                echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
+                echo '<td>' . esc_html($booking->customer_name) . '</td>';
+                echo '<td>' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
+                echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
 
-        // Check if payment slip exists and display the appropriate button or link
-        if (!empty($invoice->payment_slip)) {
-            // If payment slip exists, show the View Slip link
-            echo '<td><a href="' . esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) . '" target="_blank"><span class="dashicons dashicons-visibility"></span> View Slip</a></td>';
-        } else {
-            // If payment slip doesn't exist, show the Upload Slip button
-            echo '<td><button type="button" class="button upload-slip" data-id="' . esc_attr($invoice->id) . '">
-        <span class="dashicons dashicons-upload"></span> Upload Slip
-      </button></td>';
+                $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
+                echo '<td>' . $payment_status . '</td>';
 
+                // Check if payment slip exists and display the appropriate button or link
+                if (!empty($invoice->payment_slip)) {
+                    // If payment slip exists, show the View Slip link
+                    echo '<td><a href="' . esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) . '" target="_blank"><span class="dashicons dashicons-visibility"></span> View Slip</a></td>';
+                } else {
+                    // If payment slip doesn't exist, show the Upload Slip button
+                    echo '<td><button type="button" class="button upload-slip" data-id="' . esc_attr($invoice->id) . '">
+                        <span class="dashicons dashicons-upload"></span> Upload Slip
+                    </button></td>';
+                }
+
+                echo '</tr>';
+            }
         }
-        
-        echo '</tr>';
     }
-}
-
 
     echo '</tbody></table></form>';
 
@@ -882,13 +889,12 @@ foreach ($invoices as $invoice) {
                 <span class="close-modal">&times;</span>
                 <h2>Upload Payment Slip</h2>
                 <form id="uploadSlipForm" method="post" enctype="multipart/form-data">
-    <input type="hidden" id="invoice_id" name="invoice_id">
-    <label for="payment_slip">Select Payment Slip:</label>
-    <input type="file" name="payment_slip" id="payment_slip">
-    <br><br>
-    <button type="submit" name="upload_slip" class="button button-primary">Submit</button>
-</form>
-
+                    <input type="hidden" id="invoice_id" name="invoice_id">
+                    <label for="payment_slip">Select Payment Slip:</label>
+                    <input type="file" name="payment_slip" id="payment_slip">
+                    <br><br>
+                    <button type="submit" name="upload_slip" class="button button-primary">Submit</button>
+                </form>
             </div>
         </div>';
 
@@ -896,34 +902,34 @@ foreach ($invoices as $invoice) {
 
     echo '<script>
         document.addEventListener("DOMContentLoaded", function () {
-    var modal = document.getElementById("uploadModal");
-    var closeModal = document.querySelector(".close-modal");
-    var uploadButtons = document.querySelectorAll(".upload-slip");
+            var modal = document.getElementById("uploadModal");
+            var closeModal = document.querySelector(".close-modal");
+            var uploadButtons = document.querySelectorAll(".upload-slip");
 
-    uploadButtons.forEach(button => {
-        button.addEventListener("click", function () {
-            document.getElementById("invoice_id").value = this.dataset.id;
-            modal.style.display = "block";
+            uploadButtons.forEach(button => {
+                button.addEventListener("click", function () {
+                    document.getElementById("invoice_id").value = this.dataset.id;
+                    modal.style.display = "block";
+                });
+            });
+
+            closeModal.addEventListener("click", function () {
+                modal.style.display = "none";
+            });
+
+            window.onclick = function(event) {
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
+            };
         });
-    });
-
-    closeModal.addEventListener("click", function () {
-        modal.style.display = "none";
-    });
-
-    window.onclick = function(event) {
-        if (event.target == modal) {
-            modal.style.display = "none";
-        }
-    };
-});
-
     </script>';
 }
 
 
 
-function handle_payment_slip_upload() { 
+
+function handle_payment_slip_upload() {  
     global $wpdb;
 
     // Check if the form is submitted
@@ -944,22 +950,30 @@ function handle_payment_slip_upload() {
             if ($movefile && !isset($movefile['error'])) {
                 $file_url = str_replace(wp_upload_dir()['baseurl'] . '/', '', $movefile['url']);
 
-                // Update database with payment slip and status
-                $wpdb->update(
-                    "{$wpdb->prefix}booking_invoices",
-                    array(
-                        'payment_slip' => $file_url,
-                        'payment_status' => 'Paid'  // Update payment status to Paid
-                    ),
-                    array('id' => $invoice_id)
+                // Retrieve the invoice_number associated with the uploaded invoice
+                $invoice_number = $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT invoice_number FROM {$wpdb->prefix}booking_invoices WHERE id = %d",
+                        $invoice_id
+                    )
                 );
+
+                // If an invoice_number is found, update all related invoices' payment_status to 'Paid'
+                if ($invoice_number) {
+                    $wpdb->update(
+                        "{$wpdb->prefix}booking_invoices",
+                        array(
+                            'payment_slip' => $file_url,
+                            'payment_status' => 'Paid'  // Update payment status to Paid
+                        ),
+                        array('invoice_number' => $invoice_number)
+                    );
+                }
 
                 // Retrieve customer email from the invoice
                 $customer_email = $wpdb->get_var(
                     $wpdb->prepare(
-                        "SELECT customer_email FROM {$wpdb->prefix}booking_customers 
-                         WHERE customer_email = (SELECT customer_email FROM {$wpdb->prefix}booking_invoices WHERE id = %d LIMIT 1) 
-                         LIMIT 1",
+                        "SELECT customer_email FROM {$wpdb->prefix}booking_invoices WHERE id = %d LIMIT 1",
                         $invoice_id
                     )
                 );
@@ -982,6 +996,8 @@ function handle_payment_slip_upload() {
         }
     }
 }
+
+
 
 
 
@@ -1163,7 +1179,7 @@ register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
 
 
-function save_booking() { 
+function save_booking() {
     global $wpdb;
 
     // Get data from the AJAX request
@@ -1220,6 +1236,9 @@ function save_booking() {
     $booking_dates = []; // Track all the booking dates
     $current_date = clone $start_date_obj;
 
+    // Insert each booking date and store their booking_ids
+    $booking_ids = [];
+
     while ($current_date <= $end_date_obj) {
         $booking_date = $current_date->format('Y-m-d');
 
@@ -1255,13 +1274,13 @@ function save_booking() {
             )
         );
 
-        // Collect booking date
+        // Collect booking date and booking_id
+        $booking_ids[] = $wpdb->insert_id;
         $booking_dates[] = $booking_date;
 
         $current_date->modify('+1 week');
     }
 
-    $booking_id = $wpdb->insert_id;
     $invoice_counter = get_option('invoice_counter', 1); // Default to 1
 
     // Group booking dates by month
@@ -1290,17 +1309,19 @@ function save_booking() {
         $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
         $all_invoice_numbers[] = $invoice_number;
 
-        // Insert invoice
+        // Insert invoice for each booking_id
         $invoice_sent_at = current_time('mysql'); // Get current time in MySQL format
-        $wpdb->insert(
-            $wpdb->prefix . 'booking_invoices',
-            array(
-                'booking_id' => $booking_id,
-                'invoice_number' => $invoice_number,
-                'amount' => $amount,
-                'invoice_sent_at' => $invoice_sent_at // Store timestamp when invoice is sent
-            )
-        );
+        foreach ($booking_ids as $booking_id) {
+            $wpdb->insert(
+                $wpdb->prefix . 'booking_invoices',
+                array(
+                    'booking_id' => $booking_id,
+                    'invoice_number' => $invoice_number,
+                    'amount' => $amount,
+                    'invoice_sent_at' => $invoice_sent_at // Store timestamp when invoice is sent
+                )
+            );
+        }
 
         $invoice_id = $wpdb->insert_id;
         $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
@@ -1340,6 +1361,8 @@ function save_booking() {
 }
 
 add_action('wp_ajax_save_booking', 'save_booking');
+
+
 
 
 // Send invoice email function
@@ -1864,6 +1887,9 @@ function display_month_view($bookings, $current_month, $current_year) {
     global $wpdb;
     $booked_times = $wpdb->get_results("SELECT booking_date, start_time, end_time FROM wp_booking_calendar WHERE YEAR(booking_date) = {$current_year} AND MONTH(booking_date) = {$current_month}");
 
+    
+        // Query the database to get payment statuses
+    $payment_statuses = $wpdb->get_results("SELECT booking_id, payment_status FROM wp_booking_invoices");
     // Create a structure to store booked times by date
     $booked_times_by_date = [];
     foreach ($booked_times as $booking) {
@@ -1878,60 +1904,112 @@ function display_month_view($bookings, $current_month, $current_year) {
     foreach ($customers as $customer) {
         $customer_images[$customer->customer_name] = $customer->customer_image;
     }
+
+        // Create a structure to store payment statuses by booking_id
+    $payment_status_by_booking_id = [];
+    foreach ($payment_statuses as $status) {
+        $payment_status_by_booking_id[$status->booking_id] = $status->payment_status;
+    }
     // Include the JavaScript and CSS for the popup
     echo '
     <script>
-    function showBookingPopup(customerName, startTime, endTime, bookingType) {
-        document.getElementById("bookingPopup").style.display = "block";
-        document.getElementById("popupCustomerName").innerText = customerName;
-        document.getElementById("popupStartTime").innerText = startTime;
-        document.getElementById("popupEndTime").innerText = endTime;
-        document.getElementById("popupBookingType").innerText = bookingType;
-    }
+function showBookingPopup(customerName, startTime, endTime, bookingType) {
+    document.getElementById("bookingPopup").style.display = "block";
 
-    function closeBookingPopup() {
-        document.getElementById("bookingPopup").style.display = "none";
-    }
-    </script>
+    // Set values in non-editable mode
+    document.getElementById("popupCustomerName").innerText = customerName;
+    document.getElementById("popupStartTime").innerText = startTime;
+    document.getElementById("popupEndTime").innerText = endTime;
+    document.getElementById("popupBookingType").innerText = bookingType;
 
-    <div id="bookingPopup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); background-color:white; padding:20px; box-shadow:0px 4px 6px rgba(0,0,0,0.1); border-radius:10px; z-index:1000;">
-        <h3>Booking Details</h3>
-        <p><strong>Customer:</strong> <span id="popupCustomerName"></span></p>
-        <p><strong>Start Time:</strong> <span id="popupStartTime"></span></p>
-        <p><strong>End Time:</strong> <span id="popupEndTime"></span></p>
-        <p><strong>Booking Type:</strong> <span id="popupBookingType"></span></p>
-        <button onclick="closeBookingPopup()">Close</button>
-    </div>
+    // Set values in input fields (hidden by default)
+    document.getElementById("editCustomerName").value = customerName;
+    document.getElementById("editStartTime").value = startTime;
+    document.getElementById("editEndTime").value = endTime;
+    document.getElementById("editBookingType").value = bookingType;
 
-    <style>
-    #bookingPopup {
-        background: white;
-        border: 2px solid #333;
-        padding: 20px;
-        width: 300px;
-        text-align: center;
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        border-radius: 8px;
-        z-index: 1001;
-    }
+    toggleEditMode(false); // Show default view mode
+}
 
-    #bookingPopup button {
-        background: red;
-        color: white;
-        border: none;
-        padding: 8px 12px;
-        cursor: pointer;
-        border-radius: 5px;
-    }
+function closeBookingPopup() {
+    document.getElementById("bookingPopup").style.display = "none";
+}
 
-    #bookingPopup button:hover {
-        background: darkred;
-    }
-    </style>';
+function toggleEditMode(editMode) {
+    // Toggle visibility of spans and input fields
+    document.getElementById("popupCustomerName").style.display = editMode ? "none" : "inline";
+    document.getElementById("popupStartTime").style.display = editMode ? "none" : "inline";
+    document.getElementById("popupEndTime").style.display = editMode ? "none" : "inline";
+    document.getElementById("popupBookingType").style.display = editMode ? "none" : "inline";
+
+    document.getElementById("editCustomerName").style.display = editMode ? "inline" : "none";
+    document.getElementById("editStartTime").style.display = editMode ? "inline" : "none";
+    document.getElementById("editEndTime").style.display = editMode ? "inline" : "none";
+    document.getElementById("editBookingType").style.display = editMode ? "inline" : "none";
+
+    document.getElementById("editButton").style.display = editMode ? "none" : "inline";
+    document.getElementById("saveButton").style.display = editMode ? "inline" : "none";
+}
+
+function saveBookingDetails() {
+    // Save edited values
+    document.getElementById("popupCustomerName").innerText = document.getElementById("editCustomerName").value;
+    document.getElementById("popupStartTime").innerText = document.getElementById("editStartTime").value;
+    document.getElementById("popupEndTime").innerText = document.getElementById("editEndTime").value;
+    document.getElementById("popupBookingType").innerText = document.getElementById("editBookingType").value;
+
+    toggleEditMode(false); // Switch back to view mode
+}
+</script>
+
+<div id="bookingPopup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); background-color:white; padding:20px; box-shadow:0px 4px 6px rgba(0,0,0,0.1); border-radius:10px; z-index:1000;">
+    <h3>Booking Details</h3>
+    <p><strong>Customer:</strong> <span id="popupCustomerName"></span> <input type="text" id="editCustomerName" style="display:none;"></p>
+    <p><strong>Start Time:</strong> <span id="popupStartTime"></span> <input type="time" id="editStartTime" style="display:none;"></p>
+    <p><strong>End Time:</strong> <span id="popupEndTime"></span> <input type="time" id="editEndTime" style="display:none;"></p>
+    <p><strong>Booking Type:</strong> <span id="popupBookingType"></span> 
+        <select id="editBookingType" style="display:none;">
+            <option value="Class Rent">Class Rent</option>
+            <option value="Workspace Rent">Workspace Rent</option>
+            <option value="Conference Rent">Conference Rent</option>
+        </select>
+    </p>
+
+    <button id="editButton" onclick="toggleEditMode(true)">Edit</button>
+    <button id="saveButton" onclick="saveBookingDetails()" style="display:none;">Save</button>
+    <button onclick="closeBookingPopup()">Close</button>
+</div>
+
+<style>
+#bookingPopup {
+    background: white;
+    border: 2px solid #333;
+    padding: 20px;
+    width: 300px;
+    text-align: center;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    z-index: 1001;
+}
+
+#bookingPopup button {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 5px;
+    margin: 5px;
+}
+
+#bookingPopup button:hover {
+    background: #0056b3;
+}
+</style>';
     echo '<table class="booking-table" border="1" cellspacing="0" cellpadding="5" style="width:100%; text-align:center; border-collapse: collapse; table-layout: fixed;"> 
             <thead>
                 <tr>
@@ -1974,8 +2052,13 @@ function display_month_view($bookings, $current_month, $current_year) {
                     $booked_text_color = ($current_cell_date < $current_date) ? '#f0f0f1' : '#edebec'; // Gray for past, white for future/today
                     
 
-                    $booked_time_str .= '<div onclick="showBookingPopup(\'' . esc_js($booking->customer_name) . '\', \'' . esc_js($booking->start_time) . '\', \'' . esc_js($booking->end_time) . '\', \'' . esc_js($booking->booking_type) . '\')" 
-    style="cursor: pointer; position: relative; background-color:' . esc_attr($booking->color) . '; color: ' . $booked_text_color . '; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center;">';
+                    $onclick = '';
+if (isset($payment_status_by_booking_id[$booking->id]) && strtolower($payment_status_by_booking_id[$booking->id]) === 'pending') {
+    $onclick = 'onclick="showBookingPopup(\'' . esc_js($booking->customer_name) . '\', \'' . esc_js($booking->start_time) . '\', \'' . esc_js($booking->end_time) . '\', \'' . esc_js($booking->booking_type) . '\')"';
+}
+
+$booked_time_str .= '<div ' . $onclick . ' 
+    style="cursor: ' . ($onclick ? 'pointer' : 'default') . '; position: relative; background-color:' . esc_attr($booking->color) . '; color: ' . $booked_text_color . '; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center;">';
 
 
                     
@@ -1991,6 +2074,11 @@ function display_month_view($bookings, $current_month, $current_year) {
                     $booked_time_str .= '<br>';
                     $booked_time_str .= esc_html($booking->customer_name) . '<br>' . esc_html(date('H:i', strtotime($booking->start_time)) . ' - ' . date('H:i', strtotime($booking->end_time)));
                     $booked_time_str .= '<br><small>Type: ' . esc_html($booking->booking_type) . '</small>';
+                    // Retrieve the payment status using the correct column name for matching
+                    $payment_status = isset($payment_status_by_booking_id[$booking->id]) ? $payment_status_by_booking_id[$booking->id] : 'Not found';
+                
+                    // Display the payment status below the booking type
+                    $booked_time_str .= '<br><small>Status: ' . esc_html($payment_status) . '</small>';
                 
                     $booked_time_str .= '</div></div>';
                 }
