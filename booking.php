@@ -1,5 +1,6 @@
 <?php   
 
+
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -973,7 +974,9 @@ function handle_payment_slip_upload() {
                 // Retrieve customer email from the invoice
                 $customer_email = $wpdb->get_var(
                     $wpdb->prepare(
-                        "SELECT customer_email FROM {$wpdb->prefix}booking_invoices WHERE id = %d LIMIT 1",
+                        "SELECT customer_email FROM {$wpdb->prefix}booking_customers 
+                         WHERE customer_email = (SELECT customer_email FROM {$wpdb->prefix}booking_invoices WHERE id = %d LIMIT 1) 
+                         LIMIT 1",
                         $invoice_id
                     )
                 );
@@ -1872,6 +1875,34 @@ add_action('send_subsequent_invoice_email', 'send_subsequent_invoice_email', 10,
 
 
 
+function handle_delete_booking() {
+    // Check if the booking_id is set and is a valid number
+    if (isset($_POST['booking_id']) && is_numeric($_POST['booking_id'])) {
+        global $wpdb;
+        $booking_id = intval($_POST['booking_id']);
+        
+        // Try to delete the booking from wp_booking_calendar
+        $result = $wpdb->delete(
+            'wp_booking_calendar', 
+            array('id' => $booking_id), 
+            array('%d') // Format for booking_id as integer
+        );
+
+        // Check if the deletion was successful
+        if ($result !== false) {
+            echo json_encode(['status' => 'success']);
+        } else {
+            echo json_encode(['status' => 'error', 'message' => 'Error deleting booking']);
+        }
+    } else {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid booking ID']);
+    }
+
+    wp_die(); // Terminate the request and send the response
+}
+add_action("wp_ajax_delete_booking", "handle_delete_booking");
+add_action("wp_ajax_nopriv_delete_booking", "handle_delete_booking");
+
 
 
 function display_month_view($bookings, $current_month, $current_year) {  
@@ -1912,71 +1943,172 @@ function display_month_view($bookings, $current_month, $current_year) {
     }
     // Include the JavaScript and CSS for the popup
     echo '
-    <script>
-function showBookingPopup(customerName, startTime, endTime, bookingType) {
+<script>
+function showBookingPopup(customerName, startTime, endTime, bookingType, paymentStatus, bookingId) {
+    var bookingIdElement = document.getElementById("editBookingId");
+    if (!bookingIdElement) {
+        console.error("editBookingId element not found");
+        return; // Exit the function if the element doesnt exist
+    }
+
     document.getElementById("bookingPopup").style.display = "block";
 
-    // Set values in non-editable mode
+    // Set values in non-editable view mode (display booking details)
     document.getElementById("popupCustomerName").innerText = customerName;
     document.getElementById("popupStartTime").innerText = startTime;
     document.getElementById("popupEndTime").innerText = endTime;
     document.getElementById("popupBookingType").innerText = bookingType;
+    document.getElementById("popupPaymentStatus").innerText = paymentStatus;
 
     // Set values in input fields (hidden by default)
-    document.getElementById("editCustomerName").value = customerName;
-    document.getElementById("editStartTime").value = startTime;
-    document.getElementById("editEndTime").value = endTime;
-    document.getElementById("editBookingType").value = bookingType;
+    bookingIdElement.value = bookingId;
 
-    toggleEditMode(false); // Show default view mode
+    // Show booking details by default
+    toggleEditMode(false);
 }
+
 
 function closeBookingPopup() {
     document.getElementById("bookingPopup").style.display = "none";
 }
 
 function toggleEditMode(editMode) {
-    // Toggle visibility of spans and input fields
-    document.getElementById("popupCustomerName").style.display = editMode ? "none" : "inline";
-    document.getElementById("popupStartTime").style.display = editMode ? "none" : "inline";
-    document.getElementById("popupEndTime").style.display = editMode ? "none" : "inline";
-    document.getElementById("popupBookingType").style.display = editMode ? "none" : "inline";
+    if (editMode) {
+        // Hide the booking details and headings when editing
+        document.getElementById("popupCustomerName").style.display = "none";
+        document.getElementById("popupStartTime").style.display = "none";
+        document.getElementById("popupEndTime").style.display = "none";
+        document.getElementById("popupBookingType").style.display = "none";
+        document.getElementById("popupPaymentStatus").style.display = "none";
 
-    document.getElementById("editCustomerName").style.display = editMode ? "inline" : "none";
-    document.getElementById("editStartTime").style.display = editMode ? "inline" : "none";
-    document.getElementById("editEndTime").style.display = editMode ? "inline" : "none";
-    document.getElementById("editBookingType").style.display = editMode ? "inline" : "none";
+        // Hide the corresponding headings
+        document.getElementById("customerHeading").style.display = "none";
+        document.getElementById("startTimeHeading").style.display = "none";
+        document.getElementById("endTimeHeading").style.display = "none";
+        document.getElementById("bookingTypeHeading").style.display = "none";
+        document.getElementById("paymentStatusHeading").style.display = "none";
+        document.querySelectorAll(".popup-break").forEach(br => br.style.display = "none");
+                // Hide the "Booking Details" heading
+        document.querySelector("h3").style.display = "none"
 
-    document.getElementById("editButton").style.display = editMode ? "none" : "inline";
-    document.getElementById("saveButton").style.display = editMode ? "inline" : "none";
+        // Show the message and the "Delete" button
+        document.getElementById("editMessage").style.display = "inline";
+        document.getElementById("deleteButton").style.display = "inline";
+
+        // Hide edit/save buttons and input fields
+        document.getElementById("editButton").style.display = "none";
+        document.getElementById("saveButton").style.display = "none";
+        document.getElementById("editCustomerName").style.display = "none";
+        document.getElementById("editStartTime").style.display = "none";
+        document.getElementById("editEndTime").style.display = "none";
+        document.getElementById("editBookingType").style.display = "none";
+    } else {
+        // Show the booking details and headings when not editing
+        document.getElementById("popupCustomerName").style.display = "inline";
+        document.getElementById("popupStartTime").style.display = "inline";
+        document.getElementById("popupEndTime").style.display = "inline";
+        document.getElementById("popupBookingType").style.display = "inline";
+        document.getElementById("popupPaymentStatus").style.display = "inline";
+
+        // Show the corresponding headings
+        document.getElementById("customerHeading").style.display = "inline";
+        document.getElementById("startTimeHeading").style.display = "inline";
+        document.getElementById("endTimeHeading").style.display = "inline";
+        document.getElementById("bookingTypeHeading").style.display = "inline";
+        document.getElementById("paymentStatusHeading").style.display = "inline";
+        
+        document.querySelectorAll(".popup-break").forEach(br => br.style.display = "block");
+        // Show the "Booking Details" heading again
+        document.querySelector("h3").style.display = "block"; 
+
+        // Hide the message and delete button
+        document.getElementById("editMessage").style.display = "none";
+        document.getElementById("deleteButton").style.display = "none";
+
+        // Show the edit/save buttons and input fields
+        document.getElementById("editButton").style.display = "inline";
+        document.getElementById("saveButton").style.display = "none";
+        document.getElementById("editCustomerName").style.display = "none";
+        document.getElementById("editStartTime").style.display = "none";
+        document.getElementById("editEndTime").style.display = "none";
+        document.getElementById("editBookingType").style.display = "none";
+    }
 }
 
 function saveBookingDetails() {
-    // Save edited values
     document.getElementById("popupCustomerName").innerText = document.getElementById("editCustomerName").value;
     document.getElementById("popupStartTime").innerText = document.getElementById("editStartTime").value;
     document.getElementById("popupEndTime").innerText = document.getElementById("editEndTime").value;
     document.getElementById("popupBookingType").innerText = document.getElementById("editBookingType").value;
 
-    toggleEditMode(false); // Switch back to view mode
+    toggleEditMode(false); // Show updated details and hide edit inputs
+}
+
+function deleteBooking() {
+    if (confirm("Are you sure you want to delete this booking?")) {
+        var bookingIdElement = document.getElementById("editBookingId");
+
+        if (bookingIdElement) {
+            var bookingId = bookingIdElement.value;
+
+            jQuery.ajax({
+    url: ajaxurl,  // WordPress AJAX URL
+    type: "POST",
+    data: {
+        action: "delete_booking",  // Custom action name
+        booking_id: bookingId     // Pass the booking ID
+    },
+    success: function(response) {
+        try {
+            var data = JSON.parse(response); // Parse JSON response
+            if (data.status === "success") {
+                alert("Booking deleted successfully");
+                closeBookingPopup();
+                location.reload(); // Reload the page to reflect the changes
+            } else {
+                alert(data.message || "Error deleting booking");
+            }
+        } catch (e) {
+            console.error("Failed to parse response:", e);
+            alert("Error processing the request.");
+        }
+    },
+    error: function() {
+        alert("Error processing the request.");
+    }
+});
+
+        } else {
+            alert("Booking ID not found");
+        }
+    }
 }
 </script>
 
 <div id="bookingPopup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); background-color:white; padding:20px; box-shadow:0px 4px 6px rgba(0,0,0,0.1); border-radius:10px; z-index:1000;">
     <h3>Booking Details</h3>
-    <p><strong>Customer:</strong> <span id="popupCustomerName"></span> <input type="text" id="editCustomerName" style="display:none;"></p>
-    <p><strong>Start Time:</strong> <span id="popupStartTime"></span> <input type="time" id="editStartTime" style="display:none;"></p>
-    <p><strong>End Time:</strong> <span id="popupEndTime"></span> <input type="time" id="editEndTime" style="display:none;"></p>
-    <p><strong>Booking Type:</strong> <span id="popupBookingType"></span> 
-        <select id="editBookingType" style="display:none;">
-            <option value="Class Rent">Class Rent</option>
-            <option value="Workspace Rent">Workspace Rent</option>
-            <option value="Conference Rent">Conference Rent</option>
-        </select>
-    </p>
 
+    <!-- Display headings inline with their values -->
+<p id="customerHeading"><strong>Customer:</strong> <span id="popupCustomerName"></span></p><br class="popup-break">
+<p id="startTimeHeading"><strong>Start Time:</strong> <span id="popupStartTime"></span></p><br class="popup-break">
+<p id="endTimeHeading"><strong>End Time:</strong> <span id="popupEndTime"></span></p><br class="popup-break">
+<p id="bookingTypeHeading"><strong>Booking Type:</strong> <span id="popupBookingType"></span></p><br class="popup-break">
+<p id="paymentStatusHeading"><strong>Payment Status:</strong> <span id="popupPaymentStatus"></span></p><br class="popup-break">
+
+
+    <!-- Custom message when the booking status is pending (shown during edit mode) -->
+    <p id="editMessage" style="display:none;"><strong>This customers payment status is still pending. You can make a new booking when you delete this slot.</strong></p><br>
+
+    <!-- Hidden input for booking ID -->
+    <input type="hidden" id="editBookingId" value="<?php echo $booking->booking_id; ?>">
+
+    <!-- Edit/Delete/Save buttons -->
     <button id="editButton" onclick="toggleEditMode(true)">Edit</button>
     <button id="saveButton" onclick="saveBookingDetails()" style="display:none;">Save</button>
+
+    <!-- Delete button visible in edit mode -->
+    <button id="deleteButton" onclick="deleteBooking()" style="display:none; background-color:red;">Delete</button>
+
     <button onclick="closeBookingPopup()">Close</button>
 </div>
 
@@ -2009,6 +2141,7 @@ function saveBookingDetails() {
 #bookingPopup button:hover {
     background: #0056b3;
 }
+
 </style>';
     echo '<table class="booking-table" border="1" cellspacing="0" cellpadding="5" style="width:100%; text-align:center; border-collapse: collapse; table-layout: fixed;"> 
             <thead>
@@ -2052,10 +2185,24 @@ function saveBookingDetails() {
                     $booked_text_color = ($current_cell_date < $current_date) ? '#f0f0f1' : '#edebec'; // Gray for past, white for future/today
                     
 
-                    $onclick = '';
-if (isset($payment_status_by_booking_id[$booking->id]) && strtolower($payment_status_by_booking_id[$booking->id]) === 'pending') {
-    $onclick = 'onclick="showBookingPopup(\'' . esc_js($booking->customer_name) . '\', \'' . esc_js($booking->start_time) . '\', \'' . esc_js($booking->end_time) . '\', \'' . esc_js($booking->booking_type) . '\')"';
+$payment_status = isset($payment_status_by_booking_id[$booking->id]) ? $payment_status_by_booking_id[$booking->id] : 'Not found';
+
+$onclick = '';
+$booking_date = $booking->booking_date;  // The booking date from your booking object
+if (strtolower($payment_status) === 'pending') {
+    // Check if the booking date is not in the past
+    if ($booking_date >= $current_date) {
+        $onclick = 'onclick="showBookingPopup(\'' 
+        . esc_js($booking->customer_name) . '\', \'' 
+        . esc_js($booking->start_time) . '\', \'' 
+        . esc_js($booking->end_time) . '\', \'' 
+        . esc_js($booking->booking_type) . '\', \'' 
+        . esc_js($payment_status) . '\', \'' 
+        . esc_js($booking->id) . '\')"';
+    }
 }
+
+
 
 $booked_time_str .= '<div ' . $onclick . ' 
     style="cursor: ' . ($onclick ? 'pointer' : 'default') . '; position: relative; background-color:' . esc_attr($booking->color) . '; color: ' . $booked_text_color . '; padding: 15px; margin: 5px 0; border-radius: 6px; display: flex; flex-direction: column; justify-content: center;">';
@@ -2078,7 +2225,7 @@ $booked_time_str .= '<div ' . $onclick . '
                     $payment_status = isset($payment_status_by_booking_id[$booking->id]) ? $payment_status_by_booking_id[$booking->id] : 'Not found';
                 
                     // Display the payment status below the booking type
-                    $booked_time_str .= '<br><small>Status: ' . esc_html($payment_status) . '</small>';
+                    //$booked_time_str .= '<br><small>Status: ' . esc_html($payment_status) . '</small>';
                 
                     $booked_time_str .= '</div></div>';
                 }
