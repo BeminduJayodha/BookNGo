@@ -1,6 +1,5 @@
 <?php   
 
-
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -831,7 +830,57 @@ function display_payment_page() {
             font-size: 20px;
             cursor: pointer;
         }
+        .invoices-table {
+            border-collapse: collapse;
+    }
+    .invoices-table thead th {
+        font-weight: bold;
+        background-color: #dedede;
+        border-right: 1px solid #ccc;
+        text-align: center;
+    }
+    .invoices-table tbody td {
+        border-right: 1px solid #ccc;
+        border-bottom: 1px solid #eee;
+        text-align: center;
+        vertical-align: middle;
+    }
+    .invoices-table thead th:last-child,
+    .invoices-table tbody td:last-child {
+        border-right: none;
+    }
+        /* Creative payment status styles */
+    .status-badge {
+        width: 90px;                 /* Fixed width for all badges */
+        display: inline-block;
+        text-align: center;
+        padding: 6px 0;              /* Same vertical padding */
+        border-radius: 5px;
+        font-weight: bold;
+        color: #fff;
+        font-size: 13px;
+    }
+
+    .status-paid {
+        background-color: #4CAF50; /* Green */
+       
+    }
+
+    .status-pending {
+        background-color: #FF9800; /* Orange */
+        
+    }
     </style>';
+$selected_status = isset($_POST['filter_status']) ? $_POST['filter_status'] : 'all';
+
+echo '<div style="margin-bottom: 20px;">
+    <label for="filter_status"><strong>Filter by Payment Status:</strong></label>
+    <select name="filter_status" id="filter_status" onchange="this.form.submit()">
+        <option value="all"' . selected($selected_status, 'all', false) . '>All</option>
+        <option value="Paid"' . selected($selected_status, 'Paid', false) . '>Paid</option>
+        <option value="Pending"' . selected($selected_status, 'Pending', false) . '>Pending</option>
+    </select>
+</div>';
 
     echo '<table class="wp-list-table widefat fixed striped invoices-table" cellspacing="0" cellpadding="5" style="width:100%; border: 1px solid #ddd; margin-bottom: 20px;">
         <thead>
@@ -847,40 +896,42 @@ function display_payment_page() {
         <tbody>';
 
     // Loop through the unique invoice numbers
-    foreach ($invoice_numbers as $invoice_number) {
-        // Get the first invoice with the current invoice_number
-        $invoice = $wpdb->get_row(
-            $wpdb->prepare("SELECT * FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1", $invoice_number->invoice_number)
-        );
+foreach ($invoice_numbers as $invoice_number) {
+    $invoice = $wpdb->get_row(
+        $wpdb->prepare("SELECT * FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1", $invoice_number->invoice_number)
+    );
 
-        if ($invoice) {
-            $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
+    if ($invoice) {
+        // Apply filter
+        $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
+        if ($selected_status !== 'all' && $selected_status !== $payment_status) {
+            continue;
+        }
 
-            if ($booking) {
-                echo '<tr>';
-                echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
-                echo '<td>' . esc_html($booking->customer_name) . '</td>';
-                echo '<td>' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
-                echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
+        $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
+        if ($booking) {
+            echo '<tr>';
+            echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
+            echo '<td>' . esc_html($booking->customer_name) . '</td>';
+            echo '<td>' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
+            echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
 
-                $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
-                echo '<td>' . $payment_status . '</td>';
+            $status_class = ($payment_status === 'Paid') ? 'status-paid' : 'status-pending';
+            echo '<td><span class="status-badge ' . $status_class . '">' . $payment_status . '</span></td>';
 
-                // Check if payment slip exists and display the appropriate button or link
-                if (!empty($invoice->payment_slip)) {
-                    // If payment slip exists, show the View Slip link
-                    echo '<td><a href="' . esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) . '" target="_blank"><span class="dashicons dashicons-visibility"></span> View Slip</a></td>';
-                } else {
-                    // If payment slip doesn't exist, show the Upload Slip button
-                    echo '<td><button type="button" class="button upload-slip" data-id="' . esc_attr($invoice->id) . '">
-                        <span class="dashicons dashicons-upload"></span> Upload Slip
-                    </button></td>';
-                }
-
-                echo '</tr>';
+            if (!empty($invoice->payment_slip)) {
+                echo '<td><a href="' . esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) . '" target="_blank"><span class="dashicons dashicons-visibility"></span> View Slip</a></td>';
+            } else {
+                echo '<td><button type="button" class="button upload-slip" data-id="' . esc_attr($invoice->id) . '">
+                    <span class="dashicons dashicons-upload"></span> Upload Slip
+                </button></td>';
             }
+
+            echo '</tr>';
         }
     }
+}
+
 
     echo '</tbody></table></form>';
 
