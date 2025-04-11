@@ -82,23 +82,35 @@ add_action('admin_enqueue_scripts', 'booking_calendar_enqueue_scripts');
 
 // Admin menu for booking calendar
 function booking_calendar_menu() {
+    // Top-level menu (sidebar label)
     add_menu_page(
-        'Booking Calendar', 
-        'Booking Calendar', 
-        'edit_pages',  // Editors can access
-        'booking-calendar', 
-        'booking_calendar_page', 
+        'Booking Calendar',      // Page title
+        'LMS',     // Top-level menu label (change this!)
+        'edit_pages',
+        'booking-calendar',
+        'booking_calendar_page',
         'dashicons-calendar-alt'
     );
 
-    // Add submenus (Editors can access)
+    // First submenu — same slug as main menu to override the auto-generated one
+    add_submenu_page(
+        'booking-calendar',
+        'Booking Calendar',        // Page title
+        'Booking Calendar',        // Submenu label (what you want to display)
+        'edit_pages',
+        'booking-calendar',
+        'booking_calendar_page'
+    );
+
+    // Other submenus
     add_submenu_page('booking-calendar', 'Customer Registration', 'Customer Registration', 'edit_pages', 'customer-registration', 'customer_registration_page');
     add_submenu_page('booking-calendar', 'Customer List', 'Customer List', 'edit_pages', 'customer-list', 'customer_list_page');
-    add_submenu_page('booking-calendar', 'Customer Edit', 'Customer Edit', 'edit_pages', 'customer-edit', 'customer_edit_page');
+    add_submenu_page(null, 'Customer Edit', null, 'edit_pages', 'customer-edit', 'customer_edit_page');
     add_submenu_page('booking-calendar', 'View Invoice', 'View Invoice', 'edit_pages', 'view-invoice', 'display_invoice_page');
     add_submenu_page('booking-calendar', 'View Payment', 'View Payment', 'edit_pages', 'view-payment', 'display_payment_page');
 }
 add_action('admin_menu', 'booking_calendar_menu');
+
 function restrict_dashboard_for_editors() {
     if (current_user_can('editor')) { // Apply only for Editors
         global $menu;
@@ -803,7 +815,7 @@ function display_payment_page() {
         return;
     }
 
-    echo '<h2>Invoice Details</h2>';
+    echo '<h2>Payment Details</h2>';
 
     echo '<form method="post" enctype="multipart/form-data">';
     echo '<style>
@@ -873,14 +885,32 @@ function display_payment_page() {
     </style>';
 $selected_status = isset($_POST['filter_status']) ? $_POST['filter_status'] : 'all';
 
-echo '<div style="margin-bottom: 20px;">
+$selected_customer = isset($_POST['filter_customer']) ? $_POST['filter_customer'] : 'all';
+$customer_names = $wpdb->get_col("SELECT DISTINCT customer_name FROM {$wpdb->prefix}booking_calendar ORDER BY customer_name");
+
+echo '<div style="margin-bottom: 20px; display: flex; align-items: center; gap: 30px;">';
+
+echo '<div>
     <label for="filter_status"><strong>Filter by Payment Status:</strong></label>
-    <select name="filter_status" id="filter_status" onchange="this.form.submit()">
+    <select name="filter_status" id="filter_status" onchange="this.form.submit()" style="margin-left: 10px;">
         <option value="all"' . selected($selected_status, 'all', false) . '>All</option>
         <option value="Paid"' . selected($selected_status, 'Paid', false) . '>Paid</option>
         <option value="Pending"' . selected($selected_status, 'Pending', false) . '>Pending</option>
     </select>
 </div>';
+
+echo '<div>
+    <label for="filter_customer"><strong>Customer Name:</strong></label>
+    <select name="filter_customer" id="filter_customer" onchange="this.form.submit()" style="margin-left: 10px;">
+        <option value="all"' . selected($selected_customer, 'all', false) . '>All</option>';
+foreach ($customer_names as $customer_name) {
+    echo '<option value="' . esc_attr($customer_name) . '"' . selected($selected_customer, $customer_name, false) . '>' . esc_html($customer_name) . '</option>';
+}
+echo '</select>
+</div>';
+
+echo '</div>';
+
 
     echo '<table class="wp-list-table widefat fixed striped invoices-table" cellspacing="0" cellpadding="5" style="width:100%; border: 1px solid #ddd; margin-bottom: 20px;">
         <thead>
@@ -894,6 +924,11 @@ echo '<div style="margin-bottom: 20px;">
             </tr>
         </thead>
         <tbody>';
+// Modify the query to include the filter for payment status
+$payment_status_condition = ($selected_status !== 'all') ? "AND payment_status = %s" : '';
+$invoice_numbers = $wpdb->get_results(
+    $wpdb->prepare("SELECT DISTINCT invoice_number FROM {$wpdb->prefix}booking_invoices WHERE 1=1 $payment_status_condition", $selected_status !== 'all' ? $selected_status : null)
+);
 
     // Loop through the unique invoice numbers
 foreach ($invoice_numbers as $invoice_number) {
@@ -902,13 +937,20 @@ foreach ($invoice_numbers as $invoice_number) {
     );
 
     if ($invoice) {
-        // Apply filter
+        // Apply filter for payment status
         $payment_status = isset($invoice->payment_status) ? esc_html($invoice->payment_status) : 'Pending';
-        if ($selected_status !== 'all' && $selected_status !== $payment_status) {
+        
+        // Skip invoices that don't match the selected payment status
+        if ($selected_status !== 'all' && $payment_status !== $selected_status) {
             continue;
         }
 
         $booking = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = {$invoice->booking_id}");
+
+        if ($selected_customer !== 'all' && (!isset($booking->customer_name) || $booking->customer_name !== $selected_customer)) {
+            continue;
+        }
+
         if ($booking) {
             echo '<tr>';
             echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
@@ -931,6 +973,7 @@ foreach ($invoice_numbers as $invoice_number) {
         }
     }
 }
+
 
 
     echo '</tbody></table></form>';
@@ -2232,7 +2275,10 @@ function deleteBooking() {
                         $icon = '<span class="dashicons dashicons-money"></span>';
                     }
                 
-                    $customer_image_url = isset($customer_images[$booking->customer_name]) ? $customer_images[$booking->customer_name] : '';
+                    $customer_image_url = isset($customer_images[$booking->customer_name]) && !empty($customer_images[$booking->customer_name])
+    ? $customer_images[$booking->customer_name]
+    : 'https://designhouse.lk/wp-content/uploads/2025/04/sample-300x300.png';
+
                     $booked_text_color = ($current_cell_date < $current_date) ? '#f0f0f1' : '#edebec'; // Gray for past, white for future/today
                     
 
@@ -2431,6 +2477,24 @@ echo '</select>
     <label>Available Time Slots:</label>
     <div id="availableSlots" style="margin-bottom: 10px;"></div>
 </div>
+      
+<!-- Time Slot Checkboxes (Vertical List) -->
+<div id="manualTimeSlots" style="margin-bottom: 1px;">
+    <label><strong>Select Time Slots:</strong></label>
+    <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 5px;">
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="08:00-09:00"> 08:00 - 09:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="09:00-10:00"> 09:00 - 10:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="10:00-11:00"> 10:00 - 11:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="11:00-12:00"> 11:00 - 12:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="12:00-13:00"> 12:00 - 13:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="13:00-14:00"> 13:00 - 14:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="14:00-15:00"> 14:00 - 15:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="15:00-16:00"> 15:00 - 16:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="16:00-17:00"> 16:00 - 17:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="17:00-18:00"> 17:00 - 18:00</label>
+        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="18:00-19:00"> 18:00 - 19:00</label>
+    </div>
+</div>
 
 
                     <div style="display: flex; justify-content: space-between; gap: 10px;">
@@ -2452,7 +2516,39 @@ echo '</select>
             </form>
         </div>
     </div>';
+echo '<script> 
+const checkboxes = document.querySelectorAll(".time-slot");
+const startTimeInput = document.getElementById("start_time");
+const endTimeInput = document.getElementById("end_time");
 
+checkboxes.forEach(checkbox => {
+    checkbox.addEventListener("change", function () {
+        // Get selected checkboxes
+        const selectedSlots = Array.from(checkboxes)
+            .filter(cb => cb.checked)
+            .map(cb => cb.value);
+
+        if (selectedSlots.length > 0) {
+            // Sort slots by start time (chronologically)
+            selectedSlots.sort((a, b) => {
+                const [startA] = a.split("-");
+                const [startB] = b.split("-");
+                return startA.localeCompare(startB);
+            });
+
+            // Set start and end time based on the first and last selected slots
+            const [start,] = selectedSlots[0].split("-");
+            const [, end] = selectedSlots[selectedSlots.length - 1].split("-");
+            startTimeInput.value = start;
+            endTimeInput.value = end;
+        } else {
+            startTimeInput.value = "";
+            endTimeInput.value = "";
+        }
+    });
+});
+
+</script>';
 echo '<script>
 function checkBookingType() { 
     var bookingSelect = document.getElementById("booking_type");
