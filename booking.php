@@ -2475,40 +2475,22 @@ echo '</select>
                     
                     <div id="timeSlotContainer" style="display: none;">
     <label>Available Time Slots:</label>
-    <div id="availableSlots" style="margin-bottom: 10px;"></div>
+    <div id="availableSlots" style="margin-bottom: 2px;"></div>
 </div>
       
-<!-- Time Slot Checkboxes (Vertical List) -->
-<div id="manualTimeSlots" style="margin-bottom: 1px;">
-    <label><strong>Select Time Slots:</strong></label>
-    <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 5px;">
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="08:00-09:00"> 08:00 - 09:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="09:00-10:00"> 09:00 - 10:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="10:00-11:00"> 10:00 - 11:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="11:00-12:00"> 11:00 - 12:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="12:00-13:00"> 12:00 - 13:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="13:00-14:00"> 13:00 - 14:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="14:00-15:00"> 14:00 - 15:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="15:00-16:00"> 15:00 - 16:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="16:00-17:00"> 16:00 - 17:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="17:00-18:00"> 17:00 - 18:00</label>
-        <label><input type="checkbox" class="time-slot" name="time_slots[]" value="18:00-19:00"> 18:00 - 19:00</label>
-    </div>
-</div>
-
 
                     <div style="display: flex; justify-content: space-between; gap: 10px;">
                         <div style="flex: 1;">
                             <label for="start_time">Start Time:</label>
-                            <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;">
+                            <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;" step="3600">
                         </div>
                         <div style="flex: 1;">
                             <label for="end_time">End Time:</label>
-                            <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;">
+                            <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;" step="3600">
                         </div>
                     </div>
                     
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
                         <input type="submit" value="Save Booking" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">
                         <button type="button" onclick="closeBookingModal()" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">Close</button>
                     </div>
@@ -2516,38 +2498,39 @@ echo '</select>
             </form>
         </div>
     </div>';
-echo '<script> 
-const checkboxes = document.querySelectorAll(".time-slot");
-const startTimeInput = document.getElementById("start_time");
-const endTimeInput = document.getElementById("end_time");
+echo '<script>
+    // Function to restrict minutes to always be 00
+    function forceHourlyInput(inputElement) {
+        const value = inputElement.value;
 
-checkboxes.forEach(checkbox => {
-    checkbox.addEventListener("change", function () {
-        // Get selected checkboxes
-        const selectedSlots = Array.from(checkboxes)
-            .filter(cb => cb.checked)
-            .map(cb => cb.value);
+        // Check if value is valid and contains the minutes part
+        if (value) {
+            const [hours, minutes] = value.split(":");
 
-        if (selectedSlots.length > 0) {
-            // Sort slots by start time (chronologically)
-            selectedSlots.sort((a, b) => {
-                const [startA] = a.split("-");
-                const [startB] = b.split("-");
-                return startA.localeCompare(startB);
-            });
-
-            // Set start and end time based on the first and last selected slots
-            const [start,] = selectedSlots[0].split("-");
-            const [, end] = selectedSlots[selectedSlots.length - 1].split("-");
-            startTimeInput.value = start;
-            endTimeInput.value = end;
-        } else {
-            startTimeInput.value = "";
-            endTimeInput.value = "";
+            // Ensure minutes are always 00
+            if (minutes !== "00") {
+                inputElement.value = `${hours}:00`;
+            }
         }
-    });
-});
+    }
 
+    // Add event listeners to ensure the minutes part is non-editable
+    document.getElementById("start_time").addEventListener("input", function () {
+        forceHourlyInput(this);
+    });
+
+    document.getElementById("end_time").addEventListener("input", function () {
+        forceHourlyInput(this);
+    });
+
+    // Prevent manual input of minutes other than 00
+    document.getElementById("start_time").addEventListener("blur", function () {
+        forceHourlyInput(this);
+    });
+
+    document.getElementById("end_time").addEventListener("blur", function () {
+        forceHourlyInput(this);
+    });
 </script>';
 echo '<script>
 function checkBookingType() { 
@@ -2894,54 +2877,71 @@ function booking_calendar_modal_js() {
     <script type="text/javascript">
         // Function to show the booking modal
 function showBookingModal(date, availableSlots) {
-    var currentDate = new Date().toISOString().split('T')[0]; // Get the current date in 'YYYY-MM-DD' format
+    var currentDate = new Date().toISOString().split('T')[0];
     
-    // Prevent opening the modal for past dates
     if (date < currentDate) {
         alert("Cannot book for past dates.");
         return;
     }
 
-    console.log("showBookingModal() called", date, availableSlots); // Debugging
-
     document.getElementById("bookingDate").value = date;
     document.getElementById("start_date").value = date;
 
-    // Get the available slots container and label
     let slotsContainer = document.getElementById("availableSlots");
-    let slotsLabel = slotsContainer.previousElementSibling; // Assuming label is right before the div
+    let slotsLabel = slotsContainer.previousElementSibling;
 
-    if (slotsContainer) {
-        slotsContainer.innerHTML = ""; // Clear previous slots
+    slotsContainer.innerHTML = "";
 
-        if (availableSlots && availableSlots.trim() !== "") {
-            let slotsArray = availableSlots.split(",");
-            slotsArray.forEach(slot => {
-                let slotElement = document.createElement("div");
-                slotElement.style.margin = "5px 0";
+    if (availableSlots && availableSlots.trim() !== "") {
+        // Show available server-provided slots
+        let slotsArray = availableSlots.split(",");
+        slotsArray.forEach(slot => {
+            let slotElement = document.createElement("div");
+            slotElement.style.margin = "5px 0";
 
-                let checkbox = document.createElement("input");
-                checkbox.type = "checkbox";
-                checkbox.name = "selected_slots[]";
-                checkbox.value = slot;
-                checkbox.addEventListener('change', updateStartEndTime); // Ensure event listener
+            let checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.name = "selected_slots[]";
+            checkbox.value = slot;
+            checkbox.addEventListener('change', updateStartEndTime);
 
-                slotElement.appendChild(checkbox);
+            let label = document.createElement("label");
+            label.textContent = slot;
 
-                let label = document.createElement("label");
-                label.textContent = slot;
-                slotElement.appendChild(label);
+            slotElement.appendChild(checkbox);
+            slotElement.appendChild(label);
+            slotsContainer.appendChild(slotElement);
+        });
 
-                slotsContainer.appendChild(slotElement);
-            });
+        slotsLabel.style.display = "block";
+        slotsContainer.style.display = "block";
 
-            // Show label only if slots exist
-            slotsLabel.style.display = "block"; 
-            slotsContainer.style.display = "block";
-        } else {
-            slotsLabel.style.display = "none"; 
-            slotsContainer.style.display = "none";
+    } else {
+        // No available slots => show default hourly checkboxes
+        for (let hour = 8; hour < 19; hour++) {
+            let start = `${hour.toString().padStart(2, '0')}:00`;
+            let end = `${(hour + 1).toString().padStart(2, '0')}:00`;
+            let slot = `${start} - ${end}`;
+
+            let slotElement = document.createElement("div");
+            slotElement.style.margin = "5px 0";
+
+            let checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.name = "time_slot[]"; // different name for default slots
+            checkbox.value = slot;
+            checkbox.addEventListener('change', updateStartEndTime);
+
+            let label = document.createElement("label");
+            label.textContent = slot;
+
+            slotElement.appendChild(checkbox);
+            slotElement.appendChild(label);
+            slotsContainer.appendChild(slotElement);
         }
+
+        slotsLabel.style.display = "block";
+        slotsContainer.style.display = "block";
     }
 
     document.getElementById("bookingModal").style.display = "block";
@@ -2949,31 +2949,25 @@ function showBookingModal(date, availableSlots) {
 
 
 
+
         // Function to update start_time and end_time based on selected slots
 function updateStartEndTime() {
-    // Collect all checked time slot checkboxes
-    const checkedSlots = Array.from(document.querySelectorAll('input[name="time_slot[]"]:checked'));
+    // Combine both types of checkboxes
+    const checkedSlots = Array.from(document.querySelectorAll('input[name="time_slot[]"]:checked, input[name="selected_slots[]"]:checked'));
 
     if (checkedSlots.length === 0) {
-        // Clear fields if nothing selected
         document.getElementById("start_time").value = '';
         document.getElementById("end_time").value = '';
         return;
     }
 
-    // Get slot values like "09:00 - 10:00"
-    const slotTimes = checkedSlots.map(cb => cb.value);
-
-    // Extract start and end times
-    const times = slotTimes.map(slot => {
-        const [start, end] = slot.split(" - ");
+    const times = checkedSlots.map(cb => {
+        const [start, end] = cb.value.split(" - ");
         return { start, end };
     });
 
-    // Sort by start time
     times.sort((a, b) => a.start.localeCompare(b.start));
 
-    // Set start_time to earliest start, end_time to latest end
     document.getElementById("start_time").value = times[0].start;
     document.getElementById("end_time").value = times[times.length - 1].end;
 }
