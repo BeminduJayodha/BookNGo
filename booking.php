@@ -2953,7 +2953,8 @@ function showBookingModal(date, availableSlots) {
         // Function to update start_time and end_time based on selected slots
 function updateStartEndTime() {
     // Combine both types of checkboxes
-    const checkedSlots = Array.from(document.querySelectorAll('input[name="time_slot[]"]:checked, input[name="selected_slots[]"]:checked'));
+    const allSlots = Array.from(document.querySelectorAll('input[name="time_slot[]"], input[name="selected_slots[]"]'));
+    const checkedSlots = allSlots.filter(cb => cb.checked);
 
     if (checkedSlots.length === 0) {
         document.getElementById("start_time").value = '';
@@ -2961,16 +2962,30 @@ function updateStartEndTime() {
         return;
     }
 
-    const times = checkedSlots.map(cb => {
+    // Get indexes of all slots and checked slots
+    const slotValues = allSlots.map(cb => cb.value);
+    const checkedValues = checkedSlots.map(cb => cb.value);
+
+    // Find the first and last checked index
+    const firstCheckedIndex = slotValues.indexOf(checkedValues[0]);
+    const lastCheckedIndex = slotValues.indexOf(checkedValues[checkedValues.length - 1]);
+
+    // Select all checkboxes in between
+    for (let i = firstCheckedIndex; i <= lastCheckedIndex; i++) {
+        allSlots[i].checked = true;
+    }
+
+    // Recalculate start and end time
+    const updatedCheckedSlots = allSlots.slice(firstCheckedIndex, lastCheckedIndex + 1);
+    const times = updatedCheckedSlots.map(cb => {
         const [start, end] = cb.value.split(" - ");
         return { start, end };
     });
 
-    times.sort((a, b) => a.start.localeCompare(b.start));
-
     document.getElementById("start_time").value = times[0].start;
     document.getElementById("end_time").value = times[times.length - 1].end;
 }
+
 
 
         function closeBookingModal() {
