@@ -1,4 +1,10 @@
 <?php   
+/**
+ * Plugin Name: Booking Calendar Plugin
+ * Description: A plugin for admin to book time slots and display them with colors.
+ * Version: 1.0
+ * Author: makerspace
+ */
 
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
@@ -2482,11 +2488,11 @@ echo '</select>
                     <div style="display: flex; justify-content: space-between; gap: 10px;">
                         <div style="flex: 1;">
                             <label for="start_time">Start Time:</label>
-                            <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;" step="3600">
+                            <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;" step="3600" readonly onkeydown="return false;">
                         </div>
                         <div style="flex: 1;">
                             <label for="end_time">End Time:</label>
-                            <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;" step="3600">
+                            <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;" step="3600" readonly onkeydown="return false;">
                         </div>
                     </div>
                     
@@ -2710,6 +2716,8 @@ document.getElementById("end_date").addEventListener("change", function() {
                     checkboxContainer.appendChild(checkbox);
                     checkboxContainer.appendChild(label);
                     block.appendChild(checkboxContainer);
+                    
+                    checkbox.addEventListener("change", updateStartEndTime);
                 });
 
                 container.appendChild(block);
@@ -2730,27 +2738,27 @@ document.getElementById("end_date").addEventListener("change", function() {
 add_action('wp_ajax_get_available_class_slots', 'get_available_class_slots');
 add_action('wp_ajax_nopriv_get_available_class_slots', 'get_available_class_slots');
 
-function get_available_class_slots() { 
+function get_available_class_slots() {
     global $wpdb;
 
     $start_date = sanitize_text_field($_GET['start_date']);
     $end_date = sanitize_text_field($_GET['end_date']);
-    
-    // Convert to DateTime objects
+
     $start_date_obj = new DateTime($start_date);
     $end_date_obj = new DateTime($end_date);
 
-    // Initialize an array to store available slots across all weeks
     $common_available_slots = [];
     $first_iteration = true;
 
-    // Loop through each week between start and end date
-    while ($start_date_obj <= $end_date_obj) {
-        $current_day = $start_date_obj->format('Y-m-d');
-        
-        // Get bookings for this date
+    $loop_date = clone $start_date_obj;
+
+    // Loop weekly from start to end date
+    while ($loop_date <= $end_date_obj) {
+        $current_day = $loop_date->format('Y-m-d');
+
+        // Fetch bookings on this date
         $bookings = $wpdb->get_results($wpdb->prepare(
-            "SELECT start_time, end_time FROM wp_booking_calendar WHERE booking_date = %s", 
+            "SELECT start_time, end_time FROM wp_booking_calendar WHERE booking_date = %s",
             $current_day
         ));
 
@@ -2759,9 +2767,9 @@ function get_available_class_slots() {
             $booked_slots[] = ['start' => $b->start_time, 'end' => $b->end_time];
         }
 
-        // Generate available slots for this week
+        // Generate available hourly slots
         $available_slots = [];
-        for ($hour = 8; $hour < 19; $hour++) {  // Assuming you're checking from 8 AM to 7 PM
+        for ($hour = 8; $hour < 19; $hour++) {
             $slot_start = sprintf('%02d:00', $hour);
             $slot_end = sprintf('%02d:00', $hour + 1);
 
@@ -2782,24 +2790,22 @@ function get_available_class_slots() {
             }
         }
 
-        // For the first iteration, set the common available slots to the available slots for the first week
         if ($first_iteration) {
             $common_available_slots = $available_slots;
             $first_iteration = false;
         } else {
-            // For subsequent iterations, find the intersection of available slots with the common available slots
             $common_available_slots = array_intersect($common_available_slots, $available_slots);
         }
 
-        // Move to the next week
-        $start_date_obj->modify('+1 week');
+        // Move to same weekday in next week
+        $loop_date->modify('+1 week');
     }
 
-    // Send the common available slots to the frontend
     wp_send_json([
-        'slots' => $common_available_slots
+        'slots' => array_values($common_available_slots)
     ]);
 }
+
 
 // Handle available slots for Workspace Rent and Conference Rent
 add_action('wp_ajax_get_available_workspace_conference_slots', 'get_available_workspace_conference_slots');
