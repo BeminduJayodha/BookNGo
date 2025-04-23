@@ -1430,7 +1430,7 @@ function save_booking() {
             send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
 
             // Schedule reminder email 3 minutes after the first invoice email
-            wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Schedule subsequent invoice emails with a delay
@@ -1438,11 +1438,11 @@ function save_booking() {
             wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
             // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-            wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + $delay_counter + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Increment delay by 2 minutes (120 seconds) for each subsequent email
-        $delay_counter += 2 * 60; // 2 minutes (120 seconds)
+        $delay_counter += 60 * 60 * 60 * 60; // 2 minutes (120 seconds)
     }
 
     // Update the invoice counter in options
@@ -1702,17 +1702,51 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
             array('is_restricted' => 1),
             array('customer_email' => $customer_email)
         );
+    // Schedule final warning email and deletion after 3 minutes
+wp_schedule_single_event(time() + 180, 'send_final_warning_and_delete_booking', array(
+    $customer_email, $invoice_number, $invoice_url, $customer_name
+));
+
         return;
     }
 
     // Schedule next reminder if less than 3 have been sent
     if ($reminder_count + 1 < 3 && !wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount))) {
-        wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
+        wp_schedule_single_event(time() + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
     }
 }
 
 // Hook the function properly
 add_action('check_and_send_reminder_email', 'check_and_send_reminder_email', 10, 8);
+function send_final_warning_and_delete_booking($customer_email, $invoice_number, $invoice_url, $customer_name) {
+    global $wpdb;
+
+    $final_subject = 'Final Notice: Booking Removal Due to Unpaid Invoice';
+    $final_message = "
+    <html>
+    <body>
+        <p>Dear $customer_name,</p>
+        <p>We've sent you 3 reminders regarding your unpaid invoice <strong>#$invoice_number</strong>.</p>
+        <p>Unfortunately, we haven’t received your payment yet.We're sorry to inform you about, we will now proceed to <strong>remove your booking</strong> from our system.</p>
+        <p>If this is a mistake or you need assistance, please contact us immediately.</p>
+        <p><a href='$invoice_url'>View Your Invoice</a></p>
+        <p>Best regards,<br>Makerspace Team</p>
+    </body>
+    </html>
+    ";
+
+    wp_mail($customer_email, $final_subject, $final_message, ['Content-Type: text/html; charset=UTF-8']);
+
+    // Delete related bookings
+    $booking_ids = $wpdb->get_col(
+        $wpdb->prepare("SELECT booking_id FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s", $invoice_number)
+    );
+
+    foreach ($booking_ids as $booking_id) {
+        $wpdb->delete("{$wpdb->prefix}booking_calendar", ['id' => $booking_id]);
+    }
+}
+add_action('send_final_warning_and_delete_booking', 'send_final_warning_and_delete_booking', 10, 4);
 
 
 
