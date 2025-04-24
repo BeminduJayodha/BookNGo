@@ -289,6 +289,8 @@ function customer_registration_page() {
                             <option value="teacher">Teacher</option>
                             <option value="workspace">Workspace</option>
                             <option value="conference">Conference</option>
+                            <option value="makerspace">Makerspace</option> 
+                            <option value="rent">Rent</option> 
                         </select>
                     </td>
                 </tr>
@@ -368,7 +370,31 @@ function customer_registration_page() {
         });
     });
 </script>
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const customerTypeSelect = document.getElementById("customer_type");
+        const customerEmailInput = document.getElementById("customer_email");
+        
 
+        customerTypeSelect.addEventListener("change", function () {
+            const selectedType = customerTypeSelect.value;
+
+            // Auto-fill email and phone for "Makerspace" customer type
+            if (selectedType === "makerspace" || selectedType === "rent") {
+                customerEmailInput.value = "jayoda@lankatronics.lk";
+                customerEmailInput.readOnly = true;
+                
+            } else {
+                // Clear the fields if another customer type is selected
+                customerEmailInput.value = "";
+                customerEmailInput.readOnly = false;
+               
+            }
+        });
+
+        // Additional form submission logic here...
+    });
+</script>
 <?php
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register_customer'])) {
     global $wpdb;
@@ -1295,6 +1321,19 @@ function save_booking() {
         )
     );
 
+
+    // Get customer type
+$customer_type = $wpdb->get_var(
+    $wpdb->prepare(
+        "SELECT customer_type FROM {$wpdb->prefix}booking_customers WHERE customer_email = %s LIMIT 1",
+        $customer_email
+    )
+);
+
+// Check if invoices should be skipped
+$skip_invoices = in_array(strtolower($customer_type), ['makerspace', 'rent']);
+
+
     // Check if the customer is restricted
     $is_restricted = $wpdb->get_var(
         $wpdb->prepare(
@@ -1397,6 +1436,7 @@ function save_booking() {
     // Counter for delay in seconds (2-minute delay between each email)
     $delay_counter = 0;
 
+    if (!$skip_invoices) {
     foreach ($monthly_bookings as $month => $dates) {
         $count = count($dates);
         $amount = $count * 4000;
@@ -1430,7 +1470,7 @@ function save_booking() {
             send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
 
             // Schedule reminder email 3 minutes after the first invoice email
-            wp_schedule_single_event(time() + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Schedule subsequent invoice emails with a delay
@@ -1438,21 +1478,22 @@ function save_booking() {
             wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
             // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-            wp_schedule_single_event(time() + $delay_counter + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Increment delay by 2 minutes (120 seconds) for each subsequent email
-        $delay_counter += 60 * 60 * 60 * 60; // 2 minutes (120 seconds)
+        $delay_counter += 2 * 60; // 2 minutes (120 seconds)
     }
 
-    // Update the invoice counter in options
-    update_option('invoice_counter', $invoice_counter);
+        // Update the invoice counter in options
+        update_option('invoice_counter', $invoice_counter);
+    }
 
+    // Redirect to the invoice page regardless of whether invoices are skipped or not
     $redirect_url = 'https://designhouse.lk/wp-admin/admin.php?page=view-invoice';
 
     wp_send_json_success([
         'message' => 'Booking saved successfully!',
-        'invoice_urls' => $invoice_urls,
         'redirect_url' => $redirect_url
     ]);
 }
@@ -1712,7 +1753,7 @@ wp_schedule_single_event(time() + 180, 'send_final_warning_and_delete_booking', 
 
     // Schedule next reminder if less than 3 have been sent
     if ($reminder_count + 1 < 3 && !wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount))) {
-        wp_schedule_single_event(time() + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
+        wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
     }
 }
 
@@ -1995,6 +2036,9 @@ add_action('send_subsequent_invoice_email', 'send_subsequent_invoice_email', 10,
 //        }
 //    }
 //}
+
+
+
 
 
 
