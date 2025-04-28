@@ -1,9 +1,6 @@
 <?php
 /*
-Plugin Name: Student Registration
-Description: A simple plugin to register students for classes.
-Version: 1.0
-Author: makerspcae
+
 */
 
 // Create table
