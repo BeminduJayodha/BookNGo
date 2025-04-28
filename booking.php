@@ -24,6 +24,7 @@ function booking_calendar_install() {
         end_time TIME NOT NULL,
         color VARCHAR(7) NOT NULL,
         booking_type VARCHAR(50) NOT NULL,
+        group_id VARCHAR(64) DEFAULT NULL;
         PRIMARY KEY (id)
     ) $charset_collate;";
 
@@ -286,9 +287,7 @@ function customer_registration_page() {
                     <td>
                         <select name="customer_type" id="customer_type" required>
                             <option value="">Select Customer Type</option>
-                            <option value="teacher">Teacher</option>
-                            <option value="workspace">Workspace</option>
-                            <option value="conference">Conference</option>
+                            
                             <option value="makerspace">Makerspace</option> 
                             <option value="rent">Rent</option> 
                         </select>
@@ -380,8 +379,8 @@ function customer_registration_page() {
             const selectedType = customerTypeSelect.value;
 
             // Auto-fill email and phone for "Makerspace" customer type
-            if (selectedType === "makerspace" || selectedType === "rent") {
-                customerEmailInput.value = "jayoda@lankatronics.lk";
+            if (selectedType === "makerspace") {
+                customerEmailInput.value = "sslt.xd@gmail.com";
                 customerEmailInput.readOnly = true;
                 
             } else {
@@ -1330,8 +1329,10 @@ $customer_type = $wpdb->get_var(
     )
 );
 
-// Check if invoices should be skipped
-$skip_invoices = in_array(strtolower($customer_type), ['makerspace', 'rent']);
+
+// Check if invoices should be skipped (only for makerspace customers)
+$skip_invoices = strtolower($customer_type) === 'makerspace';
+
 
 
     // Check if the customer is restricted
@@ -1374,6 +1375,11 @@ $skip_invoices = in_array(strtolower($customer_type), ['makerspace', 'rent']);
 
     // Insert each booking date and store their booking_ids
     $booking_ids = [];
+    
+    $group_id = null;
+if (strtolower($booking_type) === 'class rent') {
+    $group_id = uniqid('class_', true); // You can customize this format
+}
 
     while ($current_date <= $end_date_obj) {
         $booking_date = $current_date->format('Y-m-d');
@@ -1397,18 +1403,20 @@ $skip_invoices = in_array(strtolower($customer_type), ['makerspace', 'rent']);
 
         // Insert booking
         $wpdb->insert(
-            $wpdb->prefix . 'booking_calendar',
-            array(
-                'customer_name' => $customer_name,
-                'start_time' => $start_time,
-                'end_time' => $end_time,
-                'booking_date' => $booking_date,
-                'start_date' => $start_date_obj->format('Y-m-d'),
-                'end_date' => $end_date_obj->format('Y-m-d'),
-                'color' => $color,
-                'booking_type' => $booking_type
-            )
-        );
+    $wpdb->prefix . 'booking_calendar',
+    array(
+        'customer_name' => $customer_name,
+        'start_time' => $start_time,
+        'end_time' => $end_time,
+        'booking_date' => $booking_date,
+        'start_date' => $start_date_obj->format('Y-m-d'),
+        'end_date' => $end_date_obj->format('Y-m-d'),
+        'color' => $color,
+        'booking_type' => $booking_type,
+        'group_id' => $group_id // <-- add this
+    )
+);
+
 
         // Collect booking date and booking_id
         $booking_ids[] = $wpdb->insert_id;
@@ -1470,7 +1478,7 @@ $skip_invoices = in_array(strtolower($customer_type), ['makerspace', 'rent']);
             send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
 
             // Schedule reminder email 3 minutes after the first invoice email
-            wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Schedule subsequent invoice emails with a delay
@@ -1478,11 +1486,11 @@ $skip_invoices = in_array(strtolower($customer_type), ['makerspace', 'rent']);
             wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
             // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-            wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + $delay_counter + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Increment delay by 2 minutes (120 seconds) for each subsequent email
-        $delay_counter += 2 * 60; // 2 minutes (120 seconds)
+        $delay_counter += 60 * 60 * 60 * 60; // 2 minutes (120 seconds)
     }
 
         // Update the invoice counter in options
@@ -1753,7 +1761,7 @@ wp_schedule_single_event(time() + 180, 'send_final_warning_and_delete_booking', 
 
     // Schedule next reminder if less than 3 have been sent
     if ($reminder_count + 1 < 3 && !wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount))) {
-        wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
+        wp_schedule_single_event(time() + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
     }
 }
 
@@ -2048,30 +2056,42 @@ add_action('send_subsequent_invoice_email', 'send_subsequent_invoice_email', 10,
 
 
 function handle_delete_booking() {
-    // Check if the booking_id is set and is a valid number
     if (isset($_POST['booking_id']) && is_numeric($_POST['booking_id'])) {
         global $wpdb;
         $booking_id = intval($_POST['booking_id']);
-        
-        // Try to delete the booking from wp_booking_calendar
-        $result = $wpdb->delete(
-            'wp_booking_calendar', 
-            array('id' => $booking_id), 
-            array('%d') // Format for booking_id as integer
+        $today = date('Y-m-d');
+
+        // Step 1: Get the group_id for the booking_id
+        $group_id = $wpdb->get_var(
+            $wpdb->prepare("SELECT group_id FROM wp_booking_calendar WHERE id = %d", $booking_id)
         );
 
-        // Check if the deletion was successful
-        if ($result !== false) {
-            echo json_encode(['status' => 'success']);
+        if ($group_id !== null) {
+            // Step 2: Delete only bookings in this group that are today or in the future
+            $result = $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM wp_booking_calendar 
+                     WHERE group_id = %s AND booking_date >= %s",
+                    $group_id,
+                    $today
+                )
+            );
+
+            if ($result !== false) {
+                echo json_encode(['status' => 'success', 'deleted_count' => $result]);
+            } else {
+                echo json_encode(['status' => 'error', 'message' => 'Error deleting future group bookings']);
+            }
         } else {
-            echo json_encode(['status' => 'error', 'message' => 'Error deleting booking']);
+            echo json_encode(['status' => 'error', 'message' => 'Group ID not found']);
         }
     } else {
         echo json_encode(['status' => 'error', 'message' => 'Invalid booking ID']);
     }
 
-    wp_die(); // Terminate the request and send the response
+    wp_die();
 }
+
 add_action("wp_ajax_delete_booking", "handle_delete_booking");
 add_action("wp_ajax_nopriv_delete_booking", "handle_delete_booking");
 
