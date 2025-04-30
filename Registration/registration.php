@@ -1,35 +1,56 @@
 <?php
 
-
 // Create table
 function student_registration_install() {
     global $wpdb;
-    $table_name = $wpdb->prefix . 'class_students';
     $charset_collate = $wpdb->get_charset_collate();
 
-    $sql = "CREATE TABLE $table_name (
-        id INT NOT NULL AUTO_INCREMENT,
-        student_name VARCHAR(255) NOT NULL,
-        student_email VARCHAR(255) NOT NULL,
-        class_selected VARCHAR(255) NOT NULL,
-        date_registered TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    $class_table = $wpdb->prefix . 'class_students';
+    $students_table = $wpdb->prefix . 'students';
+
+    $sql = "
+    CREATE TABLE $students_table (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        student_id VARCHAR(20) NOT NULLL,
+        name VARCHAR(255) NOT NULL,
+        dob DATE,
+        address TEXT,
+        phone VARCHAR(20),
+        email VARCHAR(255),
+        date_registered DATETIME DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id)
-    ) $charset_collate;";
+    ) $charset_collate;
+
+    CREATE TABLE $class_table (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        student_id VARCHAR(20) NOT NULL,
+        class_selected VARCHAR(255) NOT NULL,
+        instructor_name VARCHAR(255),
+        start_datetime DATETIME,
+        end_datetime DATETIME,
+        amount DECIMAL(10,2),
+        date_registered TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY student_id (student_id)
+    ) $charset_collate;
+    ";
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);
 }
 register_activation_hook(__FILE__, 'student_registration_install');
 
-// Uninstall hook: delete students table
+
 function student_registration_uninstall() {
     global $wpdb;
-    $table_name = $wpdb->prefix . 'class_students';
+    $class_table = $wpdb->prefix . 'class_students';
+    $students_table = $wpdb->prefix . 'students';
 
-    // Drop the table if it exists
-    $wpdb->query("DROP TABLE IF EXISTS $table_name");
+    $wpdb->query("DROP TABLE IF EXISTS $class_table");
+    $wpdb->query("DROP TABLE IF EXISTS $students_table");
 }
 register_uninstall_hook(__FILE__, 'student_registration_uninstall');
+
 
 
 // Admin menu
@@ -76,7 +97,8 @@ function student_registration_page() {
             </tr>
             <tr>
                 <th><label for="student_phone">Phone Number</label></th>
-                <td><input name="student_phone" type="tel" id="student_phone" class="regular-text" pattern="[0-9]{3}-[0-9]{3}-[0-9]{4}" placeholder="XXX-XXX-XXXX" required></td>
+<td><input name="student_phone" type="tel" id="student_phone" class="regular-text" placeholder="Enter phone number" required></td>
+
             </tr>
         </table>
 
@@ -92,7 +114,8 @@ function student_registration_page() {
                 <hr>
             </div>
         </div>
-
+                <input type="hidden" name="instructor_data" id="instructor_data" value="" />
+        <input type="hidden" name="selected_payment_option" id="selected_payment_option" value="full">
         <?php submit_button('Register Student'); ?>
     </form>
 </div>
@@ -243,9 +266,38 @@ function updateTotalAmount() {
         }
     });
 
-    // Update the total amount in the footer
+    // Display total in the instructor table
     $('#total-row .total-amount').text('$' + total.toFixed(2));
+
+    // Update payable amount based on selected option
+    const paymentOption = $('input[name="payment_option"]:checked').val();
+    let payable = paymentOption === 'monthly' ? total / 4 : total;
+
+    $('#payable-amount').text('$' + payable.toFixed(2));
 }
+
+// Recalculate payable amount when payment option changes
+$(document).on('change', 'input[name="payment_option"]', function() {
+    updateTotalAmount();
+});
+
+$('form').on('submit', function(e) {
+    $('#selected_payment_option').val($('input[name="payment_option"]:checked').val());
+    let instructorData = [];
+
+    $('#instructor-table tbody tr').each(function () {
+        const row = $(this);
+        instructorData.push({
+            name: row.data('name'),
+            from: row.data('start') + ' ' + row.data('time'),
+            to: row.data('end') + ' ' + row.data('time'), // or different end time if available
+            class_name: row.find('td:nth-child(4)').text(), // assuming 4th column is class
+            amount: row.data('amount')
+        });
+    });
+
+    $('#instructor_data').val(JSON.stringify(instructorData));
+});
 
 
 
@@ -259,25 +311,72 @@ function updateTotalAmount() {
     <?php
 
     // Handle form submission
-    if (!empty($_POST['student_name']) && !empty($_POST['class_description'])) {
-        $student_name = sanitize_text_field($_POST['student_name']);
-        $student_email = sanitize_email($_POST['student_email']);
-        $descriptions = array_map('sanitize_text_field', $_POST['class_description']);
+if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && isset($_POST['instructor_data'])) { 
+    global $wpdb;
 
-        foreach ($descriptions as $class) {
+    // Sanitize and fetch student data
+    $student_name    = sanitize_text_field($_POST['student_name']);
+    $student_dob     = sanitize_text_field($_POST['student_dob']);
+    $student_address = sanitize_textarea_field($_POST['student_address']);
+    $student_phone   = sanitize_text_field($_POST['student_phone']);
+
+    // Insert student into wp_students
+    $wpdb->insert(
+        $wpdb->prefix . 'students',
+        [
+            'name'            => $student_name,
+            'dob'             => $student_dob,
+            'address'         => $student_address,
+            'phone'           => $student_phone,
+            'date_registered' => current_time('mysql'),
+        ]
+    );
+
+    if ($wpdb->insert_id === 0) {
+        echo '<div class="notice notice-error"><p>Failed to register student.</p></div>';
+        return;
+    }
+
+    $student_auto_id = $wpdb->insert_id;
+
+    // Format student_id as STU-001, STU-002, etc.
+    $custom_student_id = 'STU-' . str_pad($student_auto_id, 3, '0', STR_PAD_LEFT);
+
+    // Update the student record with the formatted student_id
+    $wpdb->update(
+        $wpdb->prefix . 'students',
+        ['student_id' => $custom_student_id],
+        ['id' => $student_auto_id]
+    );
+
+    // Decode instructor data (should be an array of class/instructor/date info)
+    $instructors = json_decode(stripslashes($_POST['instructor_data']), true);
+
+    if (!empty($instructors) && is_array($instructors)) {
+        foreach ($instructors as $entry) {
             $wpdb->insert(
                 $wpdb->prefix . 'class_students',
                 [
-                    'student_name' => $student_name,
-                    'student_email' => $student_email,
-                    'class_selected' => $class,
-                    'date_registered' => current_time('mysql')
+                    'student_id'      => $custom_student_id,  // Corrected to use $student_auto_id
+                    'class_selected'  => sanitize_text_field($entry['class_name']),
+                    'instructor_name' => sanitize_text_field($entry['name']),
+                    'start_datetime'  => sanitize_text_field($entry['from']),
+                    'end_datetime'    => sanitize_text_field($entry['to']),
+                    'amount'          => floatval($entry['amount']),
+                    'date_registered' => current_time('mysql'),
                 ]
             );
         }
 
-        echo '<div class="notice notice-success is-dismissible"><p>Student Registered for Selected Classes Successfully!</p></div>';
+        echo '<div class="notice notice-success is-dismissible"><p>Student registered successfully!</p></div>';
+    } else {
+        echo '<div class="notice notice-warning"><p>Student added, but no class/instructor data provided.</p></div>';
     }
+}
+
+
+
+
 }
 add_action('wp_ajax_fetch_booked_slots_single', function() {
     global $wpdb;
@@ -357,6 +456,17 @@ add_action('wp_ajax_fetch_booked_slots_single', function() {
         </tr>
     </tfoot>
 </table>
+<h3>Payment Option</h3>
+<label>
+    <input type="radio" name="payment_option" value="full" checked> Full Payment
+</label>
+<label style="margin-left: 20px;">
+    <input type="radio" name="payment_option" value="monthly"> Monthly Payment (5 installments)
+</label>
+
+<p style="margin-top: 10px;">
+    <strong>Payable Amount: </strong><span id="payable-amount">$0.00</span>
+</p>
 
 </div>
 ';
