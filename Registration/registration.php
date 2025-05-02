@@ -176,6 +176,7 @@ jQuery(document).ready(function($) {
             suggestionBox.html('');
         }
     });
+$('input[name="payment_option"][value="monthly"]').closest('label').hide();
 
     // Select class from suggestions
 // Select class from suggestions and load instructor info
@@ -204,14 +205,14 @@ $(document).on('click', '.class-suggestion', function() {
         }
     });
 });
-$(document).on('click', '.add-instructor-btn', function(e) {
+// Add Instructor Button
+$(document).on('click', '.add-instructor-btn', function(e) {  
     e.preventDefault();
 
     const data = JSON.parse($(this).attr('data-instructor'));
     const $tableBody = $('#instructor-table tbody');
-    const className = $(this).closest('.class-block').find('.class-input').val(); // Get selected class name
+    const className = $(this).closest('.class-block').find('.class-input').val();
 
-    // Clean up the amount (remove $, commas, and convert to float)
     const cleanedAmount = parseFloat(data.amount.replace(/[\$,]/g, ''));
 
     // Check for duplicates
@@ -223,58 +224,131 @@ $(document).on('click', '.add-instructor-btn', function(e) {
     }).length > 0;
 
     if (!exists) {
-        // Add new row with class name in a new column, cleaned amount, and remove button
-        const $row = $(`
-            <tr data-name="${data.customer_name}" data-start="${data.start_date}" data-end="${data.end_date}" data-time="${data.start_time}" data-amount="${cleanedAmount}">
-                <td>${data.customer_name}</td>
-                <td>${data.start_date} ${data.start_time}</td>
-                <td>${data.end_date} ${data.end_time}</td>
-                <td>${className}</td> <!-- New column for class name -->
-                <td>$${cleanedAmount.toFixed(2)}</td>
-                <td><button class="remove-instructor-btn">x</button></td>
-            </tr>
-        `);
-        $tableBody.append($row);
+        const $row = $(`<tr data-name="${data.customer_name}" data-start="${data.start_date}" data-end="${data.end_date}" data-time="${data.start_time}" data-amount="${cleanedAmount}">
+            <td>${data.customer_name}</td>
+            <td>${data.start_date} ${data.start_time}</td>
+            <td>${data.end_date} ${data.end_time}</td>
+            <td>${className}</td>
+            <td>$${cleanedAmount.toFixed(2)}</td>
+            <td><button class="remove-instructor-btn">x</button></td>
+        </tr>`);
 
+        $tableBody.append($row);
         updateTotalAmount();
+        checkPaymentOptionsVisibility(); // ✅ now this works correctly
     }
 });
 
+// Remove Instructor Button
 $(document).on('click', '.remove-instructor-btn', function() {
-    // Find the row to remove
     const $row = $(this).closest('tr');
-
-    // Get the amount from the data-amount attribute
     const amount = parseFloat($row.data('amount'));
-
-    // Remove the row
     $row.remove();
 
-    // Update the total amount
     updateTotalAmount();
+    checkPaymentOptionsVisibility(); // ✅ now this works correctly
 });
 
+function checkPaymentOptionsVisibility() {
+    let allowMonthly = true;
+    const $rows = $('#instructor-table tbody tr');
 
+    $rows.each(function () {
+        const startDateStr = $(this).data('start');
+        const endDateStr = $(this).data('end');
 
-// Function to update total amount
-function updateTotalAmount() {
-    let total = 0;
-    $('#instructor-table tbody tr').each(function () {
-        const amount = parseFloat($(this).data('amount'));
-        if (!isNaN(amount)) {
-            total += amount;
+        const startDate = new Date(startDateStr);
+        const endDate = new Date(endDateStr);
+
+        const startDay = startDate.getDate();
+        const endDay = endDate.getDate();
+
+        // Get last day of end month
+        const endMonthLastDay = new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0).getDate();
+
+        const sameDayMatch = startDay === endDay;
+        const endsAtMonthEnd = endDay === endMonthLastDay;
+        const startsInFirstWeek = startDay >= 1 && startDay <= 7;
+
+        if (!(startsInFirstWeek && (sameDayMatch || endsAtMonthEnd))) {
+            allowMonthly = false;
+            return false; // Exit loop early
         }
     });
 
-    // Display total in the instructor table
-    $('#total-row .total-amount').text('$' + total.toFixed(2));
+    const $monthly = $('input[name="payment_option"][value="monthly"]').closest('label');
+    const $full = $('input[name="payment_option"][value="full"]').closest('label');
 
-    // Update payable amount based on selected option
-    const paymentOption = $('input[name="payment_option"]:checked').val();
-    let payable = paymentOption === 'monthly' ? total / 4 : total;
-
-    $('#payable-amount').text('$' + payable.toFixed(2));
+    if (allowMonthly && $rows.length > 0) {
+        $monthly.show();
+    } else {
+        $monthly.hide();
+        $('input[name="payment_option"][value="full"]').prop('checked', true);
+    }
 }
+
+
+
+
+
+
+function updateTotalAmount() {
+    let total = 0;
+    let monthWeeks = {}; // { "2025-05": 5, "2025-06": 4 }
+
+    $('#instructor-table tbody tr').each(function () {
+        const amount = parseFloat($(this).data('amount'));
+        const startDate = new Date($(this).data('start'));
+        const endDate = new Date($(this).data('end'));
+
+        if (!isNaN(amount)) {
+            total += amount;
+
+            const targetWeekday = startDate.getDay(); // e.g., Friday = 5
+            let currentDate = new Date(startDate);
+
+            while (currentDate <= endDate) {
+                if (currentDate.getDay() === targetWeekday) {
+                    const yearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+                    if (!monthWeeks[yearMonth]) {
+                        monthWeeks[yearMonth] = 0;
+                    }
+                    monthWeeks[yearMonth]++;
+                }
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+        }
+    });
+
+    $('#total-row .total-amount').text('Rs.' + total.toFixed(2));
+
+    const paymentOption = $('input[name="payment_option"]:checked').val();
+    let payable = total;
+
+    if (paymentOption === 'monthly' && Object.keys(monthWeeks).length > 0) {
+        // Calculate total sessions (weeks)
+        let totalSessions = 0;
+        for (const m in monthWeeks) {
+            totalSessions += monthWeeks[m];
+        }
+
+        // Monthly breakdown
+        let breakdown = '<h3>Weeks Breakdown by Month:</h3>';
+        for (const month in monthWeeks) {
+            const weeks = monthWeeks[month];
+            const amount = (total * weeks) / totalSessions;
+            breakdown += `<div>${month}: ${weeks} week(s) — Rs.${amount.toFixed(2)}</div>`;
+        }
+
+        $('#monthly-breakdown').html(breakdown);
+    } else {
+        $('#monthly-breakdown').html('');
+    }
+
+    $('#payable-amount').text('Rs.' + payable.toFixed(2));
+}
+
+
 
 // Recalculate payable amount when payment option changes
 $(document).on('change', 'input[name="payment_option"]', function() {
@@ -298,7 +372,13 @@ $('form').on('submit', function(e) {
 
     $('#instructor_data').val(JSON.stringify(instructorData));
 });
+jQuery(document).ready(function($) {
+    $('#student-success-modal').fadeIn();
 
+    $('#close-success-modal').on('click', function() {
+        $('#student-success-modal').fadeOut();
+    });
+});
 
 
 
@@ -368,7 +448,19 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
             );
         }
 
-        echo '<div class="notice notice-success is-dismissible"><p>Student registered successfully!</p></div>';
+        echo '<!-- Success Modal HTML -->
+<div id="student-success-modal" style="display: none;">
+    <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999;">
+        <div style="background: #fff; width: 400px; margin: 100px auto; padding: 30px; text-align: center; border-radius: 8px; position: relative;">
+            <h2 style="margin-top: 0;">Student registered successfully!</h2>
+            <p>What would you like to do next?</p>
+            <div style="margin-top: 20px;">
+                <a href="/payment-page-url" class="button button-primary" style="margin-right: 10px;">Go to Payment</a>
+                <button id="close-success-modal" class="button">Close</button>
+            </div>
+        </div>
+    </div>
+</div>';
     } else {
         echo '<div class="notice notice-warning"><p>Student added, but no class/instructor data provided.</p></div>';
     }
@@ -383,7 +475,7 @@ add_action('wp_ajax_fetch_booked_slots_single', function() {
     $description = sanitize_text_field($_POST['description']);
 
     $slots = $wpdb->get_results($wpdb->prepare(
-        "SELECT bc.id AS booking_id, bc.customer_name, bc.group_id, bc.start_date, bc.end_date, bc.start_time, bc.end_time, bi.amount
+        "SELECT bc.id AS booking_id, bc.customer_name, bc.group_id, bc.start_date, bc.end_date, bc.start_time, bc.end_time, bi.amount, bi.invoice_number
          FROM {$wpdb->prefix}booking_calendar bc
          LEFT JOIN {$wpdb->prefix}booking_invoices bi ON bc.id = bi.booking_id
          WHERE bc.description = %s",
@@ -412,12 +504,12 @@ add_action('wp_ajax_fetch_booked_slots_single', function() {
             }
 
             $grouped[$key]['booking_ids'][] = $slot->booking_id;
-            $grouped[$key]['amounts'][] = floatval($slot->amount);
+            $grouped[$key]['invoices'][$slot->invoice_number] = floatval($slot->amount);
         }
 
         foreach ($grouped as $group) {
-            $unique_amounts = array_unique($group['amounts']);
-            $total_amount = array_sum($unique_amounts);
+            $total_amount = array_sum($group['invoices']);
+
 
             $label = esc_html("Instructor: {$group['customer_name']}, From {$group['start_date']} {$group['start_time']} to {$group['end_date']} {$group['end_time']} - Amount: " . number_format($total_amount, 2));
 
@@ -452,7 +544,7 @@ add_action('wp_ajax_fetch_booked_slots_single', function() {
     <tfoot>
         <tr id="total-row">
             <td colspan="4" style="text-align: right;">Total Amount</td>
-            <td class="total-amount">$0.00</td>
+            <td class="total-amount">Rs.0.00</td>
         </tr>
     </tfoot>
 </table>
@@ -461,11 +553,12 @@ add_action('wp_ajax_fetch_booked_slots_single', function() {
     <input type="radio" name="payment_option" value="full" checked> Full Payment
 </label>
 <label style="margin-left: 20px;">
-    <input type="radio" name="payment_option" value="monthly"> Monthly Payment (5 installments)
+    <input type="radio" name="payment_option" value="monthly"> Monthly Payment
 </label>
 
 <p style="margin-top: 10px;">
-    <strong>Payable Amount: </strong><span id="payable-amount">$0.00</span>
+    <strong>Payable Amount: </strong><span id="payable-amount">Rs.0.00</span>
+    <div id="monthly-breakdown" style="margin-top:10px; font-size:14px;"></div>
 </p>
 
 </div>
