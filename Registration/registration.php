@@ -8,6 +8,7 @@ function student_registration_install() {
 
     $class_table = $wpdb->prefix . 'class_students';
     $students_table = $wpdb->prefix . 'students';
+    $payment_table= $wpdb->prefix . 'student_payments';
 
     $sql = "
     CREATE TABLE $students_table (
@@ -22,6 +23,17 @@ function student_registration_install() {
         PRIMARY KEY (id)
     ) $charset_collate;
 
+
+    CREATE TABLE $$payment_table (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        student_id VARCHAR(50),
+        class_name VARCHAR(255),
+        paid_months INT,
+        remaining_months INT,
+        due_amount DECIMAL(10,2),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) $charset_collate;
+    
     CREATE TABLE $class_table (
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         student_id VARCHAR(20) NOT NULL,
@@ -309,11 +321,19 @@ function updateTotalAmount() {
             let current = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
             const end = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
 
-            while (current <= end) {
-                const ym = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
-                monthSet.add(ym);
-                current.setMonth(current.getMonth() + 1);
-            }
+            const currentMonthKey = new Date().toISOString().slice(0, 7); // e.g., "2025-05"
+
+while (current <= end) {
+    const ym = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
+
+    // Only add months from current month onward
+    if (ym >= currentMonthKey) {
+        monthSet.add(ym);
+    }
+
+    current.setMonth(current.getMonth() + 1);
+}
+
         }
     });
 
@@ -400,6 +420,7 @@ jQuery(document).ready(function($) {
     <?php
 
 if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && isset($_POST['instructor_data'])) {
+
     global $wpdb;
 
     // Sanitize and fetch student data
@@ -407,6 +428,154 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
     $student_dob     = sanitize_text_field($_POST['student_dob']);
     $student_address = sanitize_textarea_field($_POST['student_address']);
     $student_phone   = sanitize_text_field($_POST['student_phone']);
+
+    // Prepare the confirmation modal content
+    $instructors = json_decode(stripslashes($_POST['instructor_data']), true);
+
+    if (empty($instructors) || !is_array($instructors)) {
+        echo '<div class="notice notice-error"><p>Invalid class selection data.</p></div>';
+        return;
+    }
+
+    // Get the description_code_id from booking_calendar matching the first class_name
+    $first_class_name = sanitize_text_field($instructors[0]['class_name']);
+    $description_code_id = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT description_code_id FROM {$wpdb->prefix}booking_calendar WHERE LOWER(description) = LOWER(%s) LIMIT 1",
+            $first_class_name
+        )
+    );
+
+    $description_code_id = $description_code_id ?: '000';
+    $custom_student_id = 'STU-' . strtoupper($description_code_id) . '-' . str_pad($student_auto_id, 3, '0', STR_PAD_LEFT);
+
+    // Update the student record with the formatted student_id
+    $wpdb->update(
+        $wpdb->prefix . 'students',
+        ['student_id' => $custom_student_id],
+        ['id' => $student_auto_id]
+    );
+
+    // Prepare payment summary
+    $payment_option = sanitize_text_field($_POST['selected_payment_option']);
+    $payment_summary = [];
+
+    foreach ($instructors as $entry) {
+        $start = new DateTime($entry['from']);
+        $end = new DateTime($entry['to']);
+    
+        
+
+        $month_iterator = clone $start;
+        $month_iterator->modify('first day of this month');
+        $end_month = clone $end;
+        $end_month->modify('first day of this month');
+
+        $months = [];
+        while ($month_iterator <= $end_month) {
+            $current_month = (new DateTime())->format('Y-m');
+$month_value = $month_iterator->format('Y-m');
+
+if ($month_value >= $current_month) {
+    $months[] = $month_value;
+}
+
+            $month_iterator->modify('+1 month');
+        }
+
+        $month_count = count($months);
+        $original_amount = floatval($entry['amount']);
+        $amount = $original_amount;
+
+        if ($payment_option === 'monthly' && $month_count > 0) {
+            $amount = round($original_amount / $month_count, 2);
+        }
+
+        // Calculate paid and due
+        $paid_months = ($payment_option === 'monthly') ? 1 : $month_count;
+        $remaining_months = max(0, $month_count - $paid_months);
+        $due_amount = ($payment_option === 'monthly') ? round($remaining_months * $amount, 2) : 0;
+
+        // Format months to readable names
+        $month_names = array_map(function($m) {
+            return date('F Y', strtotime($m . '-01'));
+        }, $months);
+        
+        // Separate paid and remaining month names
+        // Format months to readable names
+        $month_names = array_map(function($m) {
+            return date('F Y', strtotime($m . '-01'));
+        }, $months);
+        
+        // Separate paid and remaining month names
+        $paid_month_names = array_slice($month_names, 0, $paid_months);
+        $remaining_month_names = array_slice($month_names, $paid_months);
+
+        $payment_summary[] = [
+            'class' => $entry['class_name'],
+            'paid_months' => $paid_months,
+            'paid_month_names' => $paid_month_names,
+            'remaining_months' => $remaining_months,
+            'remaining_month_names' => $remaining_month_names,
+            'due_amount' => number_format($due_amount, 2)
+        ];
+    }
+
+    // Prepare modal payment summary HTML
+    $payment_html = '<ul style="text-align:left;">';
+    foreach ($payment_summary as $summary) {
+        $payment_html .= '<li><strong>' . esc_html($summary['class']) . '</strong>:<br>';
+        $payment_html .= 'Paid Months (' . $summary['paid_months'] . '): ' . implode(', ', $summary['paid_month_names']) . '<br>';
+        $payment_html .= 'Remaining Months (' . $summary['remaining_months'] . '): ' . implode(', ', $summary['remaining_month_names']) . '<br>';
+        $payment_html .= 'Due Amount: Rs. ' . $summary['due_amount'] . '</li>';
+    }
+    $payment_html .= '</ul>';
+
+    // Display the confirmation modal
+    echo '<div id="confirmation-modal" style="display: none;">
+        <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999;">
+            <div style="background: #fff; width: 400px; margin: 100px auto; padding: 30px; text-align: center; border-radius: 8px; position: relative;">
+                <h2 style="margin-top: 0;">Confirm Payment</h2>
+                <p>Please confirm the payment details:</p>
+                ' . $payment_html . '
+                <form method="post" id="confirm-payment-form">
+                    <input type="hidden" name="student_name" value="' . esc_attr($student_name) . '">
+                    <input type="hidden" name="student_dob" value="' . esc_attr($student_dob) . '">
+                    <input type="hidden" name="student_address" value="' . esc_attr($student_address) . '">
+                    <input type="hidden" name="student_phone" value="' . esc_attr($student_phone) . '">
+                    <input type="hidden" name="instructor_data" value="' . esc_attr(json_encode($instructors)) . '">
+                    <input type="hidden" name="selected_payment_option" value="' . esc_attr($_POST['selected_payment_option']) . '">
+                    <input type="hidden" name="confirm_payment" value="1">
+                    <button type="submit" class="button button-primary">Confirm Payment</button>
+                    <button type="button" class="button" id="cancel-confirm">Cancel</button>
+                </form>
+            </div>
+        </div>
+    </div>';
+
+    // JavaScript to handle modal display
+    echo "<script>
+        jQuery(document).ready(function($) {
+            $('#confirmation-modal').fadeIn();
+            $('#cancel-confirm').on('click', function() {
+                $('#confirmation-modal').fadeOut();
+            });
+        });
+    </script>";
+
+    return;
+}
+
+if (isset($_POST['confirm_payment']) && $_POST['confirm_payment'] == '1') {
+    // Step 2: Process Confirmed Payment and Insert Data
+
+    global $wpdb;
+
+    // Sanitize and fetch student data again
+    $student_name = sanitize_text_field($_POST['student_name']);
+    $student_dob = sanitize_text_field($_POST['student_dob']);
+    $student_address = sanitize_textarea_field($_POST['student_address']);
+    $student_phone = sanitize_text_field($_POST['student_phone']);
 
     // Insert student into wp_students
     $wpdb->insert(
@@ -461,6 +630,8 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
     foreach ($instructors as $entry) {
         $start = new DateTime($entry['from']);
         $end = new DateTime($entry['to']);
+    
+        
 
         $month_iterator = clone $start;
         $month_iterator->modify('first day of this month');
@@ -469,7 +640,13 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
 
         $months = [];
         while ($month_iterator <= $end_month) {
-            $months[] = $month_iterator->format('Y-m');
+            $current_month = (new DateTime())->format('Y-m');
+$month_value = $month_iterator->format('Y-m');
+
+if ($month_value >= $current_month) {
+    $months[] = $month_value;
+}
+
             $month_iterator->modify('+1 month');
         }
 
@@ -486,12 +663,31 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
         $remaining_months = max(0, $month_count - $paid_months);
         $due_amount = ($payment_option === 'monthly') ? round($remaining_months * $amount, 2) : 0;
 
+        // Format months to readable names
+        $month_names = array_map(function($m) {
+            return date('F Y', strtotime($m . '-01'));
+        }, $months);
+        
+        // Separate paid and remaining month names
+        // Format months to readable names
+        $month_names = array_map(function($m) {
+            return date('F Y', strtotime($m . '-01'));
+        }, $months);
+        
+        // Separate paid and remaining month names
+        $paid_month_names = array_slice($month_names, 0, $paid_months);
+        $remaining_month_names = array_slice($month_names, $paid_months);
+        
         $payment_summary[] = [
             'class' => $entry['class_name'],
             'paid_months' => $paid_months,
+            'paid_month_names' => $paid_month_names,
             'remaining_months' => $remaining_months,
+            'remaining_month_names' => $remaining_month_names,
             'due_amount' => number_format($due_amount, 2)
         ];
+
+
 
         // Insert class-student record
         $wpdb->insert(
@@ -507,12 +703,28 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
                 'date_registered' => current_time('mysql'),
             ]
         );
+$wpdb->insert(
+    $wpdb->prefix . 'student_payments',
+    [
+        'student_id'       => $custom_student_id,
+        'class_name'       => sanitize_text_field($entry['class_name']),
+        'paid_months'      => implode(', ', $paid_month_names),
+        'remaining_months' => implode(', ', $remaining_month_names),
+        'due_amount'       => $due_amount
+    ]
+);
+
+
     }
 
     // Prepare modal payment summary HTML
     $payment_html = '<ul style="text-align:left;">';
     foreach ($payment_summary as $summary) {
-        $payment_html .= '<li><strong>' . esc_html($summary['class']) . '</strong>: Paid Months - ' . $summary['paid_months'] . ', Remaining - ' . $summary['remaining_months'] . ', Due - Rs. ' . $summary['due_amount'] . '</li>';
+        $payment_html .= '<li><strong>' . esc_html($summary['class']) . '</strong>:<br>';
+        $payment_html .= 'Paid Months (' . $summary['paid_months'] . '): ' . implode(', ', $summary['paid_month_names']) . '<br>';
+        $payment_html .= 'Remaining Months (' . $summary['remaining_months'] . '): ' . implode(', ', $summary['remaining_month_names']) . '<br>';
+        $payment_html .= 'Due Amount: Rs. ' . $summary['due_amount'] . '</li>';
+
     }
     $payment_html .= '</ul>';
 
@@ -544,15 +756,18 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
     </script>";
 }
 
-
-
-
-
-
 }
-add_action('wp_ajax_fetch_booked_slots_single', function() {
+
+
+
+
+add_action('wp_ajax_fetch_booked_slots_single', function() { 
     global $wpdb;
     $description = sanitize_text_field($_POST['description']);
+
+    // Get the current month start and end dates
+    $current_month_start = date('Y-m-01'); // First day of the current month
+    $current_month_end = date('Y-m-t'); // Last day of the current month
 
     $slots = $wpdb->get_results($wpdb->prepare(
         "SELECT bc.id AS booking_id, bc.customer_name, bc.group_id, bc.start_date, bc.end_date, bc.start_time, bc.end_time, bc.course_fee
@@ -567,6 +782,16 @@ add_action('wp_ajax_fetch_booked_slots_single', function() {
         $grouped = [];
 
         foreach ($slots as $slot) {
+            // Check if the class falls within the current month
+            $start_date = $slot->start_date;
+            $end_date = $slot->end_date;
+
+            // Skip classes that end in the previous month
+            if (strtotime($end_date) < strtotime($current_month_start)) {
+                continue;
+            }
+
+            // Group classes by customer and group_id
             $key = $slot->customer_name . '|' . $slot->group_id;
 
             if (!isset($grouped[$key])) {
@@ -588,6 +813,7 @@ add_action('wp_ajax_fetch_booked_slots_single', function() {
         foreach ($grouped as $group) {
             $total_amount = $group['course_fee'];
 
+            // Only display classes within the current month
             $label = esc_html("Instructor: {$group['customer_name']}, From {$group['start_date']} {$group['start_time']} to {$group['end_date']} {$group['end_time']} - Course Fee: " . number_format($total_amount, 2));
 
             $data = esc_attr(json_encode([
@@ -634,7 +860,6 @@ add_action('wp_ajax_fetch_booked_slots_single', function() {
 
         <p style="margin-top: 10px;">
             <strong>Payable Amount: </strong><span id="payable-amount">Rs.0.00</span>
-            <div id="monthly-breakdown" style="margin-top:10px; font-size:14px;"></div>
         </p>
         </div>';
     } else {
@@ -652,34 +877,121 @@ add_action('wp_ajax_nopriv_fetch_class_suggestions', 'fetch_class_suggestions');
 
 
 
-add_action('admin_menu', 'register_student_payment_menu');
-
-function register_student_payment_menu() {
-    add_menu_page(
-        'Student Payment',                // Page title
-        'Student Payment',                // Menu title
-        'manage_options',                 // Capability
-        'student_payment_page',           // Slug
-        'student_payment_page',           // Callback function name (must match)
-        'dashicons-money-alt',            // Icon
-        30                                // Position
+function register_student_payment_submenu() {
+    add_submenu_page(
+        'student-registration',         // Parent slug
+        'Student Payment',              // Page title
+        'Student Payment',              // Menu label
+        'edit_pages',                   // Capability
+        'student_payment_page',         // Slug
+        'student_payment_page'          // Callback function
     );
 }
+add_action('admin_menu', 'register_student_payment_submenu');
 
-function student_payment_page() {
+
+function student_payment_page() { 
     global $wpdb;
 
     $students = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}students ORDER BY id DESC");
+    if (isset($_POST['mark_months_paid']) && isset($_POST['paid_months'], $_POST['student_id'], $_POST['class_name'])) {
+        $student_id = sanitize_text_field($_POST['student_id']);
+        $class_name = sanitize_text_field($_POST['class_name']);
+        $marked_paid = array_map('sanitize_text_field', $_POST['paid_months']);
+
+        $payment = $wpdb->get_row(
+            $wpdb->prepare("SELECT * FROM {$wpdb->prefix}student_payments WHERE student_id = %s AND class_name = %s", $student_id, $class_name)
+        );
+
+        if ($payment) {
+            $old_paid = array_map('trim', explode(',', $payment->paid_months));
+            $old_remaining = array_map('trim', explode(',', $payment->remaining_months));
+
+            // Update lists
+            $new_paid = array_merge($old_paid, $marked_paid);
+            $new_paid = array_unique(array_filter($new_paid));
+
+            $new_remaining = array_diff($old_remaining, $marked_paid);
+
+            // Recalculate due amount (monthly amount = old due / old remaining count)
+            $monthly_amount = ($payment->due_amount > 0 && count($old_remaining) > 0) ? ($payment->due_amount / count($old_remaining)) : 0;
+            $new_due_amount = round($monthly_amount * count($new_remaining), 2);
+
+            // Save back to DB
+            $wpdb->update(
+                $wpdb->prefix . 'student_payments',
+                [
+                    'paid_months'      => implode(', ', $new_paid),
+                    'remaining_months' => implode(', ', $new_remaining),
+                    'due_amount'       => $new_due_amount
+                ],
+                [
+                    'student_id' => $student_id,
+                    'class_name' => $class_name
+                ]
+            );
+
+            echo '<div class="updated notice"><p>Payment status updated successfully.</p></div>';
+        }
+    }
+
+    echo '<style>
+    table.student-payment-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    table.student-payment-table th {
+        background-color: #ddd;
+        font-weight: bold;
+        text-align: left;
+        padding: 10px;
+        border: 1px solid #ccc;
+        text-align: center;
+    }
+    table.student-payment-table td {
+        padding: 10px;
+        border: 1px solid #eee;
+        text-align: center;
+    }
+    table.student-payment-table tbody tr:nth-child(odd) {
+        background-color: #ffffff;
+    }
+    table.student-payment-table tbody tr:nth-child(even) {
+        background-color: #f7f7f7;
+    }
+
+    .payment-button {
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 14px;
+        cursor: pointer;
+        display: inline-block;
+        width: 100px; /* Fixed width for consistent button size */
+        text-align: center; /* Align text in the center */
+        margin: 2px;
+    }
+
+    .paid-btn {
+        background-color: green;
+        color: white;
+    }
+
+    .unpaid-btn {
+        background-color: orange;
+        color: white;
+    }
+</style>
+';
 
     echo '<div class="wrap">';
     echo '<h1>Student Payment Status</h1>';
-    echo '<table class="widefat fixed striped">';
+    echo '<table class="student-payment-table">';
     echo '<thead><tr>
             <th>Student ID</th>
             <th>Name</th>
             <th>Phone</th>
             <th>Class</th>
-            <th>Paid Months</th>
+            <th>Paid|Unpaid</th>
             <th>Remaining Months</th>
             <th>Due Amount (Rs)</th>
         </tr></thead><tbody>';
@@ -689,55 +1001,111 @@ function student_payment_page() {
         $name = $student->name;
         $phone = $student->phone;
 
-        $classes = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM {$wpdb->prefix}class_students WHERE student_id = %s",
-            $student_id
-        ));
+        // Fetch payment summary data from wp_student_payments
+        $payments = $wpdb->get_results(
+            $wpdb->prepare("SELECT * FROM {$wpdb->prefix}student_payments WHERE student_id = %s", $student_id)
+        );
 
-        if ($classes) {
-            foreach ($classes as $class) {
-                $start = new DateTime($class->start_datetime);
-                $end = new DateTime($class->end_datetime);
-
-                $month_iterator = clone $start;
-                $month_iterator->modify('first day of this month');
-                $end_month = clone $end;
-                $end_month->modify('first day of this month');
-
-                $months = [];
-                while ($month_iterator <= $end_month) {
-                    $months[] = $month_iterator->format('Y-m');
-                    $month_iterator->modify('+1 month');
-                }
-
-                $month_count = count($months);
-                $monthly_amount = ($class->amount > 0) ? floatval($class->amount) : floatval($class->full_amount) / max(1, $month_count);
-                $paid_months = 1; // Placeholder, you may replace with actual paid months from invoices
-                $remaining_months = max(0, $month_count - $paid_months);
-                $due = $monthly_amount * $remaining_months;
-
+        if ($payments) {
+            foreach ($payments as $payment) {
+                // Combine paid and remaining months in "Paid|Unpaid" column
+                $paid_months = !empty($payment->paid_months) ? $payment->paid_months : 'None';
+                $remaining_months = !empty($payment->remaining_months) ? $payment->remaining_months : 'None';
+                
                 echo '<tr>
-                        <td>' . esc_html($student_id) . '</td>
-                        <td>' . esc_html($name) . '</td>
-                        <td>' . esc_html($phone) . '</td>
-                        <td>' . esc_html($class->class_selected) . '</td>
-                        <td>' . esc_html($paid_months) . '</td>
-                        <td>' . esc_html($remaining_months) . '</td>
-                        <td>' . number_format($due, 2) . '</td>
-                    </tr>';
-            }
-        } else {
-            echo '<tr>
                     <td>' . esc_html($student_id) . '</td>
                     <td>' . esc_html($name) . '</td>
                     <td>' . esc_html($phone) . '</td>
-                    <td colspan="4">No class data available</td>
+                    <td>' . esc_html($payment->class_name) . '</td>
+                    <td>';
+
+                // Display Paid months as buttons with month names followed by the button
+                if ($paid_months !== 'None') {
+                    $paid_months_array = array_map('trim', explode(',', $paid_months));
+                    foreach ($paid_months_array as $month) {
+                        echo esc_html($month) . ' <span class="payment-button paid-btn">Paid</span><br>';
+                    }
+                }
+
+                // Display Unpaid months as buttons with month names followed by the button
+                if ($remaining_months !== 'None') {
+                    $remaining_months_array = array_map('trim', explode(',', $remaining_months));
+                    foreach ($remaining_months_array as $month) {
+                        echo esc_html($month) . ' <span class="payment-button unpaid-btn">Unpaid</span><br>';
+                    }
+                }
+
+                echo '</td>';
+
+                echo '<td><a href="#" class="open-payment-modal">' . esc_html($remaining_months) . '</a></td>
+                    <td>' . number_format($payment->due_amount, 2) . '</td>
                 </tr>';
+
+                // Payment form for updating months
+                if (!empty($payment->remaining_months)) {
+                    $remaining_months_array = array_map('trim', explode(',', $payment->remaining_months));
+                    echo '<tr class="payment-form-row" style="display:none;"><td colspan="7">
+                        <form method="post">
+                            <input type="hidden" name="student_id" value="' . esc_attr($student_id) . '">
+                            <input type="hidden" name="class_name" value="' . esc_attr($payment->class_name) . '">
+                            <label>Select months to mark as paid:</label><br><br>';
+
+                    foreach ($remaining_months_array as $month) {
+                        echo '<label><input type="checkbox" name="paid_months[]" value="' . esc_attr($month) . '"> ' . esc_html($month) . '</label><br><br>';
+                    }
+
+                    echo '<button type="submit" name="mark_months_paid" class="button button-primary">Update Payment</button>
+                        </form>
+                    </td></tr>';
+                }
+            }
+        } else {
+            echo '<tr>
+                <td>' . esc_html($student_id) . '</td>
+                <td>' . esc_html($name) . '</td>
+                <td>' . esc_html($phone) . '</td>
+                <td colspan="4">No payment data available</td>
+            </tr>';
         }
     }
 
     echo '</tbody></table></div>';
+
+?>
+<!-- Modal -->
+<div id="paymentModal" style="display:none; position:fixed; z-index:9999; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6);">
+  <div style="background:#fff; margin:10% auto; padding:20px; width:400px; position:relative;">
+    <span id="closeModal" style="position:absolute; right:10px; top:5px; cursor:pointer;">&times;</span>
+    <div id="modalContent">
+      <!-- Form content loads here -->
+    </div>
+  </div>
+</div>
+
+<script>
+jQuery(document).ready(function($){
+    $('.open-payment-modal').on('click', function(e){
+        e.preventDefault();
+        let modalContent = $(this).closest('tr').next('.payment-form-row').html();
+        $('#modalContent').html(modalContent);
+        $('#paymentModal').fadeIn();
+    });
+
+    $('#closeModal').on('click', function(){
+        $('#paymentModal').fadeOut();
+    });
+
+    $(document).on('click', function(e){
+        if ($(e.target).is('#paymentModal')) {
+            $('#paymentModal').fadeOut();
+        }
+    });
+});
+</script>
+<?php
+
 }
+
 
 // Hook to admin menu
 add_action('admin_menu', function() {
