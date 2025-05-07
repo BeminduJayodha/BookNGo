@@ -1,6 +1,5 @@
 <?php
 
-
 // Create table
 function student_registration_install() {
     global $wpdb;
@@ -130,6 +129,7 @@ function student_registration_page() {
         </div>
                 <input type="hidden" name="instructor_data" id="instructor_data" value="" />
         <input type="hidden" name="selected_payment_option" id="selected_payment_option" value="full">
+                
         <?php submit_button('Register Student'); ?>
     </form>
 </div>
@@ -420,7 +420,6 @@ jQuery(document).ready(function($) {
     <?php
 
 if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && isset($_POST['instructor_data'])) {
-
     global $wpdb;
 
     // Sanitize and fetch student data
@@ -428,154 +427,6 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
     $student_dob     = sanitize_text_field($_POST['student_dob']);
     $student_address = sanitize_textarea_field($_POST['student_address']);
     $student_phone   = sanitize_text_field($_POST['student_phone']);
-
-    // Prepare the confirmation modal content
-    $instructors = json_decode(stripslashes($_POST['instructor_data']), true);
-
-    if (empty($instructors) || !is_array($instructors)) {
-        echo '<div class="notice notice-error"><p>Invalid class selection data.</p></div>';
-        return;
-    }
-
-    // Get the description_code_id from booking_calendar matching the first class_name
-    $first_class_name = sanitize_text_field($instructors[0]['class_name']);
-    $description_code_id = $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT description_code_id FROM {$wpdb->prefix}booking_calendar WHERE LOWER(description) = LOWER(%s) LIMIT 1",
-            $first_class_name
-        )
-    );
-
-    $description_code_id = $description_code_id ?: '000';
-    $custom_student_id = 'STU-' . strtoupper($description_code_id) . '-' . str_pad($student_auto_id, 3, '0', STR_PAD_LEFT);
-
-    // Update the student record with the formatted student_id
-    $wpdb->update(
-        $wpdb->prefix . 'students',
-        ['student_id' => $custom_student_id],
-        ['id' => $student_auto_id]
-    );
-
-    // Prepare payment summary
-    $payment_option = sanitize_text_field($_POST['selected_payment_option']);
-    $payment_summary = [];
-
-    foreach ($instructors as $entry) {
-        $start = new DateTime($entry['from']);
-        $end = new DateTime($entry['to']);
-    
-        
-
-        $month_iterator = clone $start;
-        $month_iterator->modify('first day of this month');
-        $end_month = clone $end;
-        $end_month->modify('first day of this month');
-
-        $months = [];
-        while ($month_iterator <= $end_month) {
-            $current_month = (new DateTime())->format('Y-m');
-$month_value = $month_iterator->format('Y-m');
-
-if ($month_value >= $current_month) {
-    $months[] = $month_value;
-}
-
-            $month_iterator->modify('+1 month');
-        }
-
-        $month_count = count($months);
-        $original_amount = floatval($entry['amount']);
-        $amount = $original_amount;
-
-        if ($payment_option === 'monthly' && $month_count > 0) {
-            $amount = round($original_amount / $month_count, 2);
-        }
-
-        // Calculate paid and due
-        $paid_months = ($payment_option === 'monthly') ? 1 : $month_count;
-        $remaining_months = max(0, $month_count - $paid_months);
-        $due_amount = ($payment_option === 'monthly') ? round($remaining_months * $amount, 2) : 0;
-
-        // Format months to readable names
-        $month_names = array_map(function($m) {
-            return date('F Y', strtotime($m . '-01'));
-        }, $months);
-        
-        // Separate paid and remaining month names
-        // Format months to readable names
-        $month_names = array_map(function($m) {
-            return date('F Y', strtotime($m . '-01'));
-        }, $months);
-        
-        // Separate paid and remaining month names
-        $paid_month_names = array_slice($month_names, 0, $paid_months);
-        $remaining_month_names = array_slice($month_names, $paid_months);
-
-        $payment_summary[] = [
-            'class' => $entry['class_name'],
-            'paid_months' => $paid_months,
-            'paid_month_names' => $paid_month_names,
-            'remaining_months' => $remaining_months,
-            'remaining_month_names' => $remaining_month_names,
-            'due_amount' => number_format($due_amount, 2)
-        ];
-    }
-
-    // Prepare modal payment summary HTML
-    $payment_html = '<ul style="text-align:left;">';
-    foreach ($payment_summary as $summary) {
-        $payment_html .= '<li><strong>' . esc_html($summary['class']) . '</strong>:<br>';
-        $payment_html .= 'Paid Months (' . $summary['paid_months'] . '): ' . implode(', ', $summary['paid_month_names']) . '<br>';
-        $payment_html .= 'Remaining Months (' . $summary['remaining_months'] . '): ' . implode(', ', $summary['remaining_month_names']) . '<br>';
-        $payment_html .= 'Due Amount: Rs. ' . $summary['due_amount'] . '</li>';
-    }
-    $payment_html .= '</ul>';
-
-    // Display the confirmation modal
-    echo '<div id="confirmation-modal" style="display: none;">
-        <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999;">
-            <div style="background: #fff; width: 400px; margin: 100px auto; padding: 30px; text-align: center; border-radius: 8px; position: relative;">
-                <h2 style="margin-top: 0;">Confirm Payment</h2>
-                <p>Please confirm the payment details:</p>
-                ' . $payment_html . '
-                <form method="post" id="confirm-payment-form">
-                    <input type="hidden" name="student_name" value="' . esc_attr($student_name) . '">
-                    <input type="hidden" name="student_dob" value="' . esc_attr($student_dob) . '">
-                    <input type="hidden" name="student_address" value="' . esc_attr($student_address) . '">
-                    <input type="hidden" name="student_phone" value="' . esc_attr($student_phone) . '">
-                    <input type="hidden" name="instructor_data" value="' . esc_attr(json_encode($instructors)) . '">
-                    <input type="hidden" name="selected_payment_option" value="' . esc_attr($_POST['selected_payment_option']) . '">
-                    <input type="hidden" name="confirm_payment" value="1">
-                    <button type="submit" class="button button-primary">Confirm Payment</button>
-                    <button type="button" class="button" id="cancel-confirm">Cancel</button>
-                </form>
-            </div>
-        </div>
-    </div>';
-
-    // JavaScript to handle modal display
-    echo "<script>
-        jQuery(document).ready(function($) {
-            $('#confirmation-modal').fadeIn();
-            $('#cancel-confirm').on('click', function() {
-                $('#confirmation-modal').fadeOut();
-            });
-        });
-    </script>";
-
-    return;
-}
-
-if (isset($_POST['confirm_payment']) && $_POST['confirm_payment'] == '1') {
-    // Step 2: Process Confirmed Payment and Insert Data
-
-    global $wpdb;
-
-    // Sanitize and fetch student data again
-    $student_name = sanitize_text_field($_POST['student_name']);
-    $student_dob = sanitize_text_field($_POST['student_dob']);
-    $student_address = sanitize_textarea_field($_POST['student_address']);
-    $student_phone = sanitize_text_field($_POST['student_phone']);
 
     // Insert student into wp_students
     $wpdb->insert(
@@ -659,9 +510,10 @@ if ($month_value >= $current_month) {
         }
 
         // Calculate paid and due
-        $paid_months = ($payment_option === 'monthly') ? 1 : $month_count;
-        $remaining_months = max(0, $month_count - $paid_months);
-        $due_amount = ($payment_option === 'monthly') ? round($remaining_months * $amount, 2) : 0;
+        $paid_months = 0; // No months paid
+$remaining_months = $month_count;
+$due_amount = $original_amount; // Full amount remains due
+
 
         // Format months to readable names
         $month_names = array_map(function($m) {
@@ -729,34 +581,219 @@ $wpdb->insert(
     $payment_html .= '</ul>';
 
     // Show success modal
-    echo '<div id="student-success-modal" style="display: none;">
-        <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999;">
-            <div style="background: #fff; width: 400px; margin: 100px auto; padding: 30px; text-align: center; border-radius: 8px; position: relative;">
-                <h2 style="margin-top: 0;">Student registered successfully!</h2>
-                <p><strong>Student ID:</strong> ' . esc_html($custom_student_id) . '</p>
-                <p><strong>Payment Summary:</strong></p>
-                ' . $payment_html . '
-                <div style="margin-top: 20px;">
-                    <a href="/wp-admin/admin.php?page=student_payment_page" class="button button-primary">Go to Payment</a>
-
-                    <button id="close-success-modal" class="button">Close</button>
-                </div>
+// Show success modal
+echo '<div id="student-success-modal" style="display: none;">
+    <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999;">
+        <div style="background: #fff; width: 400px; margin: 100px auto; padding: 30px; text-align: center; border-radius: 8px; position: relative;">
+            <h2 style="margin-top: 0;">Student registered successfully!</h2>
+            <p><strong>Student ID:</strong> ' . esc_html($custom_student_id) . '</p>
+            <p><strong>Payment Summary:</strong></p>
+            <div id="payment-summary">' . $payment_html . '</div> <!-- This will be updated dynamically -->
+            <div style="margin-top: 20px;">
+                <a href="/wp-admin/admin.php?page=student_payment_page" class="button button-primary">Go to Payment</a>
+                <button id="update-payment-button" class="button button-secondary">Update Payment</button>
+                <button id="close-success-modal" class="button">Close</button>
             </div>
         </div>
-    </div>';
+    </div>
+</div>';
 
-    // Show modal with JS
-    echo "<script>
-        jQuery(document).ready(function($) {
-            $('#student-success-modal').fadeIn();
-            $('#close-success-modal').on('click', function() {
-                $('#student-success-modal').fadeOut();
+
+// Fetch remaining_months from database
+global $wpdb;
+$table_name = $wpdb->prefix . 'student_payments';
+
+$payment_data = $wpdb->get_row(
+    $wpdb->prepare("SELECT remaining_months FROM $table_name WHERE student_id = %s", $custom_student_id)
+);
+
+$checkbox_html = '';
+
+if ($payment_data && !empty($payment_data->remaining_months)) {
+    $months = array_map('trim', explode(',', $payment_data->remaining_months));
+    foreach ($months as $month) {
+        $checkbox_html .= '<label style="display: block; margin-bottom: 8px;">
+            <input type="checkbox" name="payment_months[]" value="' . esc_attr($month) . '"> ' . esc_html($month) . '
+        </label>';
+    }
+} else {
+    $checkbox_html = '<p>No remaining months found.</p>';
+}
+
+// Modal for updating payment with checkboxes
+echo '<div id="update-payment-modal" style="display: none;">
+    <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999;">
+        <div style="background: #fff; width: 400px; margin: 100px auto; padding: 30px; text-align: center; border-radius: 8px; position: relative;">
+            <h2>Update Payment</h2>
+            <form id="update-payment-form">
+                <h4>Select Months to Pay:</h4>
+                ' . $checkbox_html . '
+                <div style="margin-top: 15px;">
+                    <button type="submit" class="button button-primary">Submit Payment</button>
+                    <button type="button" id="close-update-payment-modal" class="button">Close</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>';
+
+// JavaScript for handling the modal and AJAX
+echo "<script>
+    jQuery(document).ready(function($) {
+        // Show the success modal
+        $('#student-success-modal').fadeIn();
+
+        // Close success modal
+        $('#close-success-modal').on('click', function() {
+            $('#student-success-modal').fadeOut();
+        });
+
+        // Open update payment modal
+        $('#update-payment-button').on('click', function() {
+            $('#update-payment-modal').fadeIn();
+        });
+
+        // Close update payment modal
+        $('#close-update-payment-modal').on('click', function() {
+            $('#update-payment-modal').fadeOut();
+        });
+
+        // Handle the form submission via AJAX
+        $('#update-payment-form').on('submit', function(e) {
+            e.preventDefault();
+
+            // Get the selected months from the checkboxes
+            var selectedMonths = [];
+            $('input[name=\"payment_months[]\"]:checked').each(function() {
+                selectedMonths.push($(this).val());
+            });
+
+            // Send AJAX request to update the database
+            $.ajax({
+                url: '" . admin_url('admin-ajax.php') . "',
+                type: 'POST',
+                data: {
+                    action: 'update_student_payment_months',
+                    student_id: '" . esc_js($custom_student_id) . "',
+                    payment_months: selectedMonths
+                },
+                success: function(response) {
+                    if (response.success) {
+                        alert('Payment updated successfully!');
+                        
+                        // Now, fetch the updated payment details to display in the modal
+                        $.ajax({
+                            url: '" . admin_url('admin-ajax.php') . "',
+                            type: 'POST',
+                            data: {
+                                action: 'fetch_updated_payment_summary',
+                                student_id: '" . esc_js($custom_student_id) . "'
+                            },
+                            success: function(response) {
+                                if (response.success) {
+                                    // Update the Payment Summary in the success modal with the new details
+                                    $('#payment-summary').html(response.data.payment_summary);
+                                } else {
+                                    alert('Failed to fetch updated payment details.');
+                                }
+                            }
+                        });
+
+                        // Close the update payment modal
+                        $('#update-payment-modal').fadeOut();
+                    } else {
+                        alert('There was an error updating the payment.');
+                    }
+                }
             });
         });
-    </script>";
+    });
+</script>";
+
+
+
 }
 
 }
+// Handle AJAX request to update student payment months
+function update_student_payment_months() {
+    if (isset($_POST['student_id']) && isset($_POST['payment_months'])) {
+        global $wpdb;
+        $student_id = sanitize_text_field($_POST['student_id']);
+        $payment_months = array_map('sanitize_text_field', $_POST['payment_months']);
+        
+        // Get current remaining_months from the database
+        $table_name = $wpdb->prefix . 'student_payments';
+        $payment_data = $wpdb->get_row(
+            $wpdb->prepare("SELECT remaining_months FROM $table_name WHERE student_id = %s", $student_id)
+        );
+        
+        if ($payment_data && !empty($payment_data->remaining_months)) {
+            // Convert remaining_months into an array
+            $remaining_months = array_map('trim', explode(',', $payment_data->remaining_months));
+
+            // Remove selected months from the remaining months
+            $remaining_months = array_diff($remaining_months, $payment_months);
+
+            // Update paid_months and remaining_months
+            $paid_months = implode(',', $payment_months);
+            $remaining_months = implode(',', $remaining_months);
+
+            // Update the database with paid_months and remaining_months
+            $updated = $wpdb->update(
+                $table_name,
+                array(
+                    'paid_months' => $paid_months,
+                    'remaining_months' => $remaining_months
+                ),
+                array('student_id' => $student_id)
+            );
+
+            if ($updated !== false) {
+                wp_send_json_success();  // Return success
+            } else {
+                wp_send_json_error();    // Return error
+            }
+        }
+    }
+
+    wp_die();
+}
+
+// Register the AJAX action for logged-in users
+add_action('wp_ajax_update_student_payment_months', 'update_student_payment_months');
+// Handle AJAX request to fetch updated payment summary
+function fetch_updated_payment_summary() {
+    if (isset($_POST['student_id'])) {
+        global $wpdb;
+        $student_id = sanitize_text_field($_POST['student_id']);
+
+        // Fetch the updated payment details from the database
+        $table_name = $wpdb->prefix . 'student_payments';
+        $payment_data = $wpdb->get_row(
+            $wpdb->prepare("SELECT paid_months, remaining_months FROM $table_name WHERE student_id = %s", $student_id)
+        );
+
+        if ($payment_data) {
+            // Prepare the updated payment summary
+            $paid_months = !empty($payment_data->paid_months) ? implode(', ', explode(',', $payment_data->paid_months)) : 'No months paid yet';
+            $remaining_months = !empty($payment_data->remaining_months) ? implode(', ', explode(',', $payment_data->remaining_months)) : 'All months paid';
+
+            // Create the new payment summary HTML
+            $payment_summary = '<strong>Paid Months:</strong> ' . esc_html($paid_months) . '<br>';
+            $payment_summary .= '<strong>Remaining Months:</strong> ' . esc_html($remaining_months);
+
+            wp_send_json_success(array('payment_summary' => $payment_summary));
+        } else {
+            wp_send_json_error();
+        }
+    }
+
+    wp_die();
+}
+
+// Register the AJAX action for logged-in users
+add_action('wp_ajax_fetch_updated_payment_summary', 'fetch_updated_payment_summary');
 
 
 
