@@ -31,7 +31,8 @@ function student_registration_install() {
         paid_months INT,
         remaining_months INT,
         due_amount DECIMAL(10,2),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        payment_method VARCHAR(50)
     ) $charset_collate;
     
     CREATE TABLE $class_table (
@@ -1078,13 +1079,18 @@ function student_payment_page() {
                     <td>' . esc_html($phone) . '</td>
                     <td>' . esc_html($payment->class_name) . '</td>
                     <td>';
+$current_month = date('F Y'); // e.g., "May 2025"
 
-                if ($paid_months !== 'None') {
+                // Paid months
+if ($paid_months !== 'None') {
     $paid_months_array = array_map('trim', explode(',', $paid_months));
     foreach ($paid_months_array as $month) {
+        $is_current = ($month === $current_month);
+        $button_class = 'paid-btn';
+        $button_style = $is_current ? '' : 'background-color: #ccc; color: #666; opacity: 0.5; pointer-events: none;';
         echo '<div class="payment-month" data-student="' . esc_attr($student_id) . '" data-class="' . esc_attr($payment->class_name) . '" data-month="' . esc_attr($month) . '" data-status="paid">
                 ' . esc_html($month) . ' 
-                <span class="payment-button paid-btn">Paid</span>
+                <span class="payment-button ' . $button_class . '" style="' . $button_style . '">Paid</span>
             </div>';
     }
 }
@@ -1092,13 +1098,26 @@ function student_payment_page() {
 // Unpaid months
 if ($remaining_months !== 'None') {
     $remaining_months_array = array_map('trim', explode(',', $remaining_months));
+    $per_month_due = (count($remaining_months_array) > 0) ? ($payment->due_amount / count($remaining_months_array)) : 0;
+
     foreach ($remaining_months_array as $month) {
-        echo '<div class="payment-month" data-student="' . esc_attr($student_id) . '" data-class="' . esc_attr($payment->class_name) . '" data-month="' . esc_attr($month) . '" data-status="unpaid">
+        $is_current = ($month === $current_month);
+        $button_class = 'unpaid-btn';
+        $button_style = $is_current ? '' : 'background-color: #ccc; color: #666; opacity: 0.5; pointer-events: none;';
+        echo '<div class="payment-month" 
+                    data-student="' . esc_attr($student_id) . '" 
+                    data-class="' . esc_attr($payment->class_name) . '" 
+                    data-month="' . esc_attr($month) . '" 
+                    data-status="unpaid"
+                    data-due-amount="' . esc_attr(round($per_month_due, 2)) . '">
                 ' . esc_html($month) . ' 
-                <span class="payment-button unpaid-btn">Unpaid</span>
+                <span class="payment-button ' . $button_class . '" style="' . $button_style . '">Unpaid</span>
             </div>';
     }
 }
+
+
+
 
                 echo '</td>
                     <td>' . number_format($payment->due_amount, 2) . '</td>
@@ -1132,58 +1151,166 @@ if ($remaining_months !== 'None') {
     }
 
     echo '</tbody></table></div>';
-echo '<script>
+
+echo '
+<div id="unpaidModal" style="display:none; position:fixed; top:20%; left:50%; transform:translateX(-50%); background:white; padding:20px; border:1px solid #ccc; z-index:1000;">  
+    <h2>Mark This Month as Paid</h2>
+    <form id="ajax-payment-form">
+        <input type="hidden" name="student_id" id="modal_student_id">
+        <input type="hidden" name="class_name" id="modal_class_name">
+        <input type="hidden" name="month" id="modal_month">
+
+        <p id="modal_student_display"></p>
+        <p id="modal_month_display"></p>
+        <p id="modal_amount_display"></p>
+
+<label for="modal_payment_method">Select Payment Method:</label><br>
+<input type="radio" id="cash" name="payment_method" value="cash" required>
+<label for="cash">Cash</label><br>
+
+<input type="radio" id="banktransfer" name="payment_method" value="banktransfer">
+<label for="banktransfer">Bank Transfer</label><br>
+
+<input type="radio" id="card" name="payment_method" value="card">
+<label for="card">Card</label><br>
+
+
+        <button type="submit" class="button button-primary">Confirm Payment</button>
+        <button type="button" id="closeModal" class="button">Cancel</button>
+        <div id="payment-status-msg" style="margin-top:10px;"></div>
+    </form>
+</div>
+<div id="modalOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:999;"></div>
+
+<script>
 jQuery(document).ready(function($) {
-    $(".payment-month").on("click", ".payment-button", function () {
-        var parent = $(this).closest(".payment-month");
-        var currentStatus = parent.data("status");
-        var dropdown = $("<select>")
-            .append("<option value=\'paid\'>Paid</option>")
-            .append("<option value=\'unpaid\'>Unpaid</option>");
-        dropdown.val(currentStatus);
-        $(this).replaceWith(dropdown);
-        dropdown.focus();
+    $(".payment-month").on("click", ".unpaid-btn", function () {
+        if ($(this).css("pointer-events") === "none") return;
 
-        dropdown.on("change", function () {
-            var newStatus = $(this).val();
-            var student_id = parent.data("student");
-            var class_name = parent.data("class");
-            var month = parent.data("month");
+        const parent = $(this).closest(".payment-month");
+        const student_id = parent.data("student");
+        const class_name = parent.data("class");
+        const month = parent.data("month");
+        const dueAmount = parseFloat(parent.data("due-amount")).toFixed(2);
 
-            $.ajax({
-                url: "' . admin_url('admin-ajax.php') . '",
-                type: "POST",
-                data: {
-                    action: "update_month_payment_status",
-                    student_id: student_id,
-                    class_name: class_name,
-                    month: month,
-                    new_status: newStatus
-                },
-                success: function (response) {
-                    if (response.success) {
-                        parent.data("status", newStatus);
-                        var buttonClass = newStatus === "paid" ? "paid-btn" : "unpaid-btn";
-                        var buttonText = newStatus.charAt(0).toUpperCase() + newStatus.slice(1);
-                        dropdown.replaceWith("<span class=\'payment-button " + buttonClass + "\'>" + buttonText + "</span>");
-                    } else {
-                        alert("Failed to update. " + response.data);
-                        dropdown.replaceWith("<span class=\'payment-button " + currentStatus + "-btn\'>" + currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1) + "</span>");
-                    }
-                },
-                error: function () {
-                    alert("AJAX error occurred.");
-                    dropdown.replaceWith("<span class=\'payment-button " + currentStatus + "-btn\'>" + currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1) + "</span>");
+        // Set modal values that are immediately available
+        $("#modal_amount_display").text("Pay Amount: Rs " + dueAmount);
+        $("#modal_student_id").val(student_id);
+        $("#modal_class_name").val(class_name);
+        $("#modal_month").val(month);
+
+        // Temporary display while fetching instructor
+        $("#modal_student_display").html(
+            "<strong>Student ID:</strong> " + student_id + "<br>" +
+            "<strong>Class:</strong> " + class_name + "<br>" +
+            "<strong>Instructor:</strong> Loading..."
+        );
+
+        // Month display
+        $("#modal_month_display").text("You are marking \"" + month + "\" as paid.");
+        $("#unpaidModal, #modalOverlay").fadeIn();
+
+        // AJAX call to fetch instructor name
+        $.ajax({
+            url: ajaxurl,
+            method: "POST",
+            data: {
+                action: "get_instructor_by_student",
+                student_id: student_id
+            },
+            success: function(response) {
+                if (response.success) {
+                    $("#modal_student_display").html(
+                        "<strong>Student ID:</strong> " + student_id + "<br>" +
+                        "<strong>Class:</strong> " + class_name + "<br>" +
+                        "<strong>Instructor:</strong> " + response.data.instructor_name
+                    );
+                } else {
+                    $("#modal_student_display").append("<br><strong>Instructor:</strong> Not found");
                 }
-            });
+            },
+            error: function() {
+                $("#modal_student_display").append("<br><strong>Instructor:</strong> Error fetching");
+            }
         });
     });
+
+    $("#closeModal, #modalOverlay").on("click", function () {
+        $("#unpaidModal, #modalOverlay").fadeOut();
+    });
+
+$("#ajax-payment-form").on("submit", function (e) {
+    e.preventDefault();
+
+    const student_id = $("#modal_student_id").val();
+    const class_name = $("#modal_class_name").val();
+    const month = $("#modal_month").val();
+
+    // Fetch the selected radio button value for payment method
+    const payment_method = $("input[name=\"payment_method\"]:checked").val();  // Use double quotes inside the selector
+  // Get selected radio button value
+
+    if (!payment_method) {
+        $("#payment-status-msg").text("Please select a payment method.").css("color", "red");
+        return;
+    }
+
+    $.ajax({
+        url: ajaxurl,
+        method: "POST",
+        data: {
+            action: "update_month_payment_status",
+            student_id,
+            class_name,
+            month,
+            new_status: "paid",
+            payment_method // Send the selected payment method to the server
+        },
+        success: function(response) {
+            if (response.success) {
+                $("#payment-status-msg").text("Payment updated successfully!").css("color", "green");
+                setTimeout(() => {
+                    $("#unpaidModal, #modalOverlay").fadeOut();
+                    location.reload(); // refresh to reflect UI change
+                }, 800);
+            } else {
+                $("#payment-status-msg").text("Error: " + response.data).css("color", "red");
+            }
+        }
+    });
 });
-</script>';
+
+});
+</script>
+
+';
+
+
 
 }
-add_action('wp_ajax_update_month_payment_status', 'update_month_payment_status');
+add_action('wp_ajax_get_instructor_by_student', 'get_instructor_by_student');
+function get_instructor_by_student() {
+    global $wpdb;
 
+    $student_id = intval($_POST['student_id']);
+    $table = $wpdb->prefix . 'class_students';
+
+    // Assumes instructor name is stored in wp_class_students table
+    $result = $wpdb->get_var($wpdb->prepare(
+        "SELECT instructor_name FROM $table WHERE student_id = %d LIMIT 1",
+        $student_id
+    ));
+
+    if ($result) {
+        wp_send_json_success(['instructor_name' => $result]);
+    } else {
+        wp_send_json_error('Instructor not found.');
+    }
+}
+
+
+
+add_action('wp_ajax_update_month_payment_status', 'update_month_payment_status');
 function update_month_payment_status() {
     global $wpdb;
 
@@ -1191,9 +1318,13 @@ function update_month_payment_status() {
     $class_name = sanitize_text_field($_POST['class_name']);
     $month = sanitize_text_field($_POST['month']);
     $new_status = sanitize_text_field($_POST['new_status']);
+    $payment_method = sanitize_text_field($_POST['payment_method']); // NEW
 
     $table = $wpdb->prefix . 'student_payments';
-    $payment = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE student_id = %s AND class_name = %s", $student_id, $class_name));
+    $payment = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $table WHERE student_id = %s AND class_name = %s",
+        $student_id, $class_name
+    ));
 
     if (!$payment) {
         wp_send_json_error('Payment record not found.');
@@ -1203,13 +1334,11 @@ function update_month_payment_status() {
     $remaining_months = array_map('trim', explode(',', $payment->remaining_months));
 
     if ($new_status === 'paid') {
-        // Move from remaining to paid
         if (!in_array($month, $paid_months)) {
             $paid_months[] = $month;
         }
         $remaining_months = array_diff($remaining_months, [$month]);
     } elseif ($new_status === 'unpaid') {
-        // Move from paid to remaining
         if (!in_array($month, $remaining_months)) {
             $remaining_months[] = $month;
         }
@@ -1218,23 +1347,20 @@ function update_month_payment_status() {
         wp_send_json_error('Invalid status.');
     }
 
-    // Sort and clean
-    $paid_months = array_unique(array_filter(array_map('trim', $paid_months)));
-    $remaining_months = array_unique(array_filter(array_map('trim', $remaining_months)));
+    $paid_months = array_unique(array_filter($paid_months));
+    $remaining_months = array_unique(array_filter($remaining_months));
 
-    // Recalculate due amount
-    $monthly_amount = 0;
-    $old_total = (float) $payment->due_amount;
+    // Calculate monthly due
+    $old_total = (float)$payment->due_amount;
     $original_remaining_count = count(array_map('trim', explode(',', $payment->remaining_months)));
-    if ($original_remaining_count > 0) {
-        $monthly_amount = $old_total / $original_remaining_count;
-    }
+    $monthly_amount = ($original_remaining_count > 0) ? $old_total / $original_remaining_count : 0;
     $new_due_amount = round($monthly_amount * count($remaining_months), 2);
 
     $wpdb->update($table, [
         'paid_months'      => implode(', ', $paid_months),
         'remaining_months' => implode(', ', $remaining_months),
-        'due_amount'       => $new_due_amount
+        'due_amount'       => $new_due_amount,
+        'payment_method'   => $payment_method // SAVE
     ], [
         'student_id' => $student_id,
         'class_name' => $class_name
@@ -1242,6 +1368,20 @@ function update_month_payment_status() {
 
     wp_send_json_success('Month status updated.');
 }
+// Daily Financial Report Page//
+function daily_financial_submenu() { 
+    add_submenu_page(
+        'student-registration',         // Parent slug (must match the menu_slug of the parent menu)
+        'Daily Financial Report',       // Page title (shown in browser title)
+        'Daily Financial Report',       // Menu title (shown in sidebar menu)
+        'edit_pages',                   // Capability (make sure the current user has this capability)
+        'daily-financial-report',       // Submenu slug (should be unique)
+        'daily-financial-report'          // Callback function name (must be a valid function)
+    );
+}
+add_action('admin_menu', 'daily_financial_submenu');
+
+//End Daily Financial Report Page//
 
 
 //
