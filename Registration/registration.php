@@ -1,6 +1,5 @@
 <?php
 
-
 // Create table
 function student_registration_install() {
     global $wpdb;
@@ -387,6 +386,7 @@ $(document).on('change', 'input[name="payment_option"]', function() {
 });
 
 $('form').on('submit', function(e) {
+
     $('#selected_payment_option').val($('input[name="payment_option"]:checked').val());
     let instructorData = [];
 
@@ -628,8 +628,28 @@ echo '<div id="update-payment-modal" style="display: none;">
         <div style="background: #fff; width: 400px; margin: 100px auto; padding: 30px; text-align: center; border-radius: 8px; position: relative;">
             <h2>Update Payment</h2>
             <form id="update-payment-form">
-                <h4>Select Months to Pay:</h4>
-                ' . $checkbox_html . '
+<div style="margin-bottom: 15px; text-align: center;">
+    <div style="display: inline-block; text-align: left;">
+        <h4 style="margin-bottom: 10px;">Select Months to Pay:</h4>
+        ' . $checkbox_html . '
+    </div>
+</div>
+<div style="margin-bottom: 15px; text-align: center;">
+    <div style="display: inline-block; text-align: left;">
+        <h4 style="margin-bottom: 10px;">Select Payment Method</h4>
+        <label style="display: block; margin: 5px 0;">
+            <input type="radio" name="payment_method" value="cash" required> Cash
+        </label>
+        <label style="display: block; margin: 5px 0;">
+            <input type="radio" name="payment_method" value="bank transfer"> Bank Transfer
+        </label>
+        <label style="display: block; margin: 5px 0;">
+            <input type="radio" name="payment_method" value="card"> Card
+        </label>
+    </div>
+</div>
+
+
                 <div style="margin-top: 15px;">
                     <button type="submit" class="button button-primary">Submit Payment</button>
                     <button type="button" id="close-update-payment-modal" class="button">Close</button>
@@ -677,7 +697,8 @@ echo "<script>
                 data: {
                     action: 'update_student_payment_months',
                     student_id: '" . esc_js($custom_student_id) . "',
-                    payment_months: selectedMonths
+                    payment_months: selectedMonths,
+                    payment_method: $('input[name=\"payment_method\"]:checked').val()
                 },
                 success: function(response) {
                     if (response.success) {
@@ -723,6 +744,7 @@ function update_student_payment_months() {
         global $wpdb;
         $student_id = sanitize_text_field($_POST['student_id']);
         $new_paid_months = array_map('sanitize_text_field', $_POST['payment_months']);
+        $payment_method = isset($_POST['payment_method']) ? sanitize_text_field($_POST['payment_method']) : '';
 
         $payment_table = $wpdb->prefix . 'student_payments';
         $student_table = $wpdb->prefix . 'class_students';
@@ -760,6 +782,7 @@ function update_student_payment_months() {
             // Step 6: Calculate due amount
             $per_month_amount = $total_months > 0 ? ($full_amount / $total_months) : 0;
             $due_amount = $full_amount - ($per_month_amount * ($paid_month_count + count($existing_paid_months)));
+            $last_paid_amount = $per_month_amount * count($new_paid_months);
 
             // Step 7: Merge new paid months with existing ones
             $updated_paid_months = array_unique(array_merge($existing_paid_months, $new_paid_months));
@@ -770,7 +793,10 @@ function update_student_payment_months() {
                 array(
                     'paid_months' => implode(',', $updated_paid_months),
                     'remaining_months' => implode(',', $updated_remaining_months),
-                    'due_amount' => round($due_amount, 2)
+                    'due_amount' => round($due_amount, 2),
+                    'payment_method' => $payment_method,
+                    'last_paid_amount' => round($last_paid_amount, 2),
+                    'last_paid_date' => current_time('mysql')
                 ),
                 array('student_id' => $student_id)
             );
@@ -1173,6 +1199,8 @@ echo '
 
 <input type="radio" id="card" name="payment_method" value="card">
 <label for="card">Card</label><br>
+<input type="hidden" name="pay_amount" id="modal_pay_amount">
+
 
 
         <button type="submit" class="button button-primary">Confirm Payment</button>
@@ -1192,9 +1220,11 @@ jQuery(document).ready(function($) {
         const class_name = parent.data("class");
         const month = parent.data("month");
         const dueAmount = parseFloat(parent.data("due-amount")).toFixed(2);
+        
 
         // Set modal values that are immediately available
         $("#modal_amount_display").text("Pay Amount: Rs " + dueAmount);
+        $("#modal_pay_amount").val(dueAmount); // Set hidden input
         $("#modal_student_id").val(student_id);
         $("#modal_class_name").val(class_name);
         $("#modal_month").val(month);
@@ -1245,6 +1275,7 @@ $("#ajax-payment-form").on("submit", function (e) {
     const student_id = $("#modal_student_id").val();
     const class_name = $("#modal_class_name").val();
     const month = $("#modal_month").val();
+    const pay_amount = $("#modal_pay_amount").val();
 
     // Fetch the selected radio button value for payment method
     const payment_method = $("input[name=\"payment_method\"]:checked").val();  // Use double quotes inside the selector
@@ -1264,7 +1295,8 @@ $("#ajax-payment-form").on("submit", function (e) {
             class_name,
             month,
             new_status: "paid",
-            payment_method // Send the selected payment method to the server
+            payment_method, // Send the selected payment method to the server
+            pay_amount 
         },
         success: function(response) {
             if (response.success) {
@@ -1319,6 +1351,8 @@ function update_month_payment_status() {
     $month = sanitize_text_field($_POST['month']);
     $new_status = sanitize_text_field($_POST['new_status']);
     $payment_method = sanitize_text_field($_POST['payment_method']); // NEW
+    $pay_amount = floatval($_POST['pay_amount']);
+    $last_paid_date = current_time('mysql');
 
     $table = $wpdb->prefix . 'student_payments';
     $payment = $wpdb->get_row($wpdb->prepare(
@@ -1360,7 +1394,9 @@ function update_month_payment_status() {
         'paid_months'      => implode(', ', $paid_months),
         'remaining_months' => implode(', ', $remaining_months),
         'due_amount'       => $new_due_amount,
-        'payment_method'   => $payment_method // SAVE
+        'payment_method'   => $payment_method, // SAVE
+        'last_paid_amount'  => $pay_amount,
+        'last_paid_date'    => $last_paid_date
     ], [
         'student_id' => $student_id,
         'class_name' => $class_name
@@ -1369,17 +1405,184 @@ function update_month_payment_status() {
     wp_send_json_success('Month status updated.');
 }
 // Daily Financial Report Page//
-function daily_financial_submenu() { 
+function daily_financial_submenu() {  
     add_submenu_page(
-        'student-registration',         // Parent slug (must match the menu_slug of the parent menu)
-        'Daily Financial Report',       // Page title (shown in browser title)
-        'Daily Financial Report',       // Menu title (shown in sidebar menu)
-        'edit_pages',                   // Capability (make sure the current user has this capability)
-        'daily-financial-report',       // Submenu slug (should be unique)
-        'daily-financial-report'          // Callback function name (must be a valid function)
+        'student-registration',         // Parent slug
+        'Daily Financial Report',       // Page title
+        'Daily Financial Report',       // Menu title
+        'edit_pages',                   // Capability
+        'daily-financial-report',       // Submenu slug
+        'daily_financial_report'        // ✅ Callback function name (no quotes)
     );
 }
 add_action('admin_menu', 'daily_financial_submenu');
+
+function daily_financial_report() {
+    ?>
+    <div class="wrap">
+        <h1>Daily Financial Report</h1>
+
+        <form id="financial-report-form">
+            <label for="start_date">Start Date:</label>
+            <input type="date" id="start_date" name="start_date" required>
+
+            <label for="end_date">End Date:</label>
+            <input type="date" id="end_date" name="end_date" required>
+        </form>
+
+        <div id="report-results" style="margin-top: 30px;">
+            <!-- Radio buttons and total will appear here -->
+        </div>
+
+        <div id="report-summary" style="margin-top: 30px;">
+            <!-- Summary for selected method -->
+        </div>
+    </div>
+
+    <script>
+        jQuery(document).ready(function($) {
+            function fetchFinancialReport() {
+                const start = $('#start_date').val();
+                const end = $('#end_date').val();
+
+                if (!start || !end) return;
+
+                $.ajax({
+                    url: ajaxurl,
+                    method: 'POST',
+                    data: {
+                        action: 'get_financial_report',
+                        start_date: start,
+                        end_date: end
+                    },
+                    success: function(response) {
+                        $('#report-results').html(response.data.html);
+                        $('#report-summary').html('');
+
+                        $('input[name="payment_method"]').on('change', function() {
+                            $('#report-summary').html(response.data.summaries[$(this).val()]);
+                        });
+                    }
+                });
+            }
+
+            // Trigger fetch when either date changes
+            $('#start_date, #end_date').on('change', fetchFinancialReport);
+        });
+    </script>
+    <?php
+}
+
+add_action('wp_ajax_get_financial_report', 'get_financial_report');
+function get_financial_report() {
+    global $wpdb;
+
+$start_date = sanitize_text_field($_POST['start_date']) . ' 00:00:00';
+$end_date = sanitize_text_field($_POST['end_date']) . ' 23:59:59';
+
+
+    $table = $wpdb->prefix . 'student_payments';
+
+    // Get total amount grouped by payment method within date range
+    $results = $wpdb->get_results(
+        $wpdb->prepare("
+            SELECT LOWER(payment_method) as method, SUM(last_paid_amount) as total
+            FROM $table
+            WHERE last_paid_date BETWEEN %s AND %s
+            GROUP BY payment_method
+        ", $start_date, $end_date),
+        OBJECT_K
+    );
+
+    // Get all individual records in that range for summary
+$payments = $wpdb->get_results(
+    $wpdb->prepare("
+        SELECT student_id, payment_method, last_paid_amount, paid_months, class_name
+        FROM $table
+        WHERE last_paid_date BETWEEN %s AND %s
+    ", $start_date, $end_date),
+    ARRAY_A
+);
+
+
+    // Initialize totals with fallback 0 if no rows returned
+    $totals = [
+        'cash' => isset($results['cash']) ? floatval($results['cash']->total) : 0,
+        'banktransfer' => isset($results['banktransfer']) ? floatval($results['banktransfer']->total) : 0,
+        'card' => isset($results['card']) ? floatval($results['card']->total) : 0,
+    ];
+
+$summaries = [
+    'cash' => '<table style="width:100%; border-collapse: collapse; border: 1px solid #000;">
+        <tr>
+            <th style="border: 1px solid #000; padding: 6px;">Student ID</th>
+            <th style="border: 1px solid #000; padding: 6px;">Class</th>
+            <th style="border: 1px solid #000; padding: 6px;">Month</th>
+            <th style="border: 1px solid #000; padding: 6px;">Amount</th>
+        </tr>',
+    'banktransfer' => '<table style="width:100%; border-collapse: collapse; border: 1px solid #000;">
+        <tr>
+            <th style="border: 1px solid #000; padding: 6px;">Student ID</th>
+            <th style="border: 1px solid #000; padding: 6px;">Class</th>
+            <th style="border: 1px solid #000; padding: 6px;">Month</th>
+            <th style="border: 1px solid #000; padding: 6px;">Amount</th>
+        </tr>',
+    'card' => '<table style="width:100%; border-collapse: collapse; border: 1px solid #000;">
+        <tr>
+            <th style="border: 1px solid #000; padding: 6px;">Student ID</th>
+            <th style="border: 1px solid #000; padding: 6px;">Class</th>
+            <th style="border: 1px solid #000; padding: 6px;">Month</th>
+            <th style="border: 1px solid #000; padding: 6px;">Amount</th>
+        </tr>',
+];
+
+
+
+foreach ($payments as $payment) {
+    $method = strtolower($payment['payment_method']);
+    $amount = floatval($payment['last_paid_amount']);
+    $class_name = esc_html($payment['class_name']);
+    $month = esc_html($payment['paid_months']); // Adjust if using multiple months
+
+    if (isset($summaries[$method])) {
+        $summaries[$method] .= "<tr>
+            <td style='border: 1px solid #000; padding: 6px;'>{$payment['student_id']}</td>
+            <td style='border: 1px solid #000; padding: 6px;'>{$class_name}</td>
+            <td style='border: 1px solid #000; padding: 6px;'>{$month}</td>
+            <td style='border: 1px solid #000; padding: 6px;'>" . number_format($amount, 2) . "</td>
+        </tr>";
+    }
+}
+
+
+// Properly close each table
+foreach ($summaries as $key => $table) {
+    $summaries[$key] .= '</table>';
+}
+
+
+
+    $total_all = array_sum($totals);
+
+    ob_start();
+    ?>
+    <div>
+        <label><input type="radio" name="payment_method" value="cash"> Cash Payments: <?php echo number_format($totals['cash'], 2); ?></label><br>
+        <label><input type="radio" name="payment_method" value="banktransfer"> Bank Transfers: <?php echo number_format($totals['banktransfer'], 2); ?></label><br>
+        <label><input type="radio" name="payment_method" value="card"> Card Payments: <?php echo number_format($totals['card'], 2); ?></label><br><br>
+        <strong>Total: <?php echo number_format($total_all, 2); ?></strong>
+    </div>
+    <?php
+    $html = ob_get_clean();
+
+    wp_send_json_success([
+        'html' => $html,
+        'summaries' => $summaries
+    ]);
+}
+
+
+
 
 //End Daily Financial Report Page//
 
