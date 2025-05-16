@@ -478,6 +478,8 @@ if (!empty($_POST['student_name']) && !empty($_POST['class_description']) && iss
 
     // Prepare payment summary
     $payment_option = sanitize_text_field($_POST['selected_payment_option']);
+    $js_payment_option = esc_js($payment_option);
+    $payment_option_label = ($payment_option === 'monthly') ? 'Monthly Payment' : 'Full Payment';
     $payment_summary = [];
 
     foreach ($instructors as $entry) {
@@ -589,6 +591,7 @@ echo '<div id="student-success-modal" style="display: none;">
         <div style="background: #fff; width: 400px; margin: 100px auto; padding: 30px; text-align: center; border-radius: 8px; position: relative;">
             <h2 style="margin-top: 0;">Student registered successfully!</h2>
             <p><strong>Student ID:</strong> ' . esc_html($custom_student_id) . '</p>
+            <p><strong>Payment Option:</strong> ' . esc_html($payment_option_label) . '</p>
             <p><strong>Payment Summary:</strong></p>
             <div id="payment-summary">' . $payment_html . '</div> <!-- This will be updated dynamically -->
             <div style="margin-top: 20px;">
@@ -622,6 +625,20 @@ if ($payment_data && !empty($payment_data->remaining_months)) {
     $checkbox_html = '<p>No remaining months found.</p>';
 }
 
+
+
+
+
+global $wpdb;
+
+$student_data = $wpdb->get_row( $wpdb->prepare(
+    "SELECT class_selected, instructor_name FROM wp_class_students WHERE student_id = %d LIMIT 1",
+    $custom_student_id
+) );
+
+$class_name = $student_data ? $student_data->class_selected : 'No class assigned';
+$instructor_name = $student_data ? $student_data->instructor_name : 'No instructor assigned';
+
 // Modal for updating payment with checkboxes
 echo '<div id="update-payment-modal" style="display: none;">
     <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999;">
@@ -630,7 +647,7 @@ echo '<div id="update-payment-modal" style="display: none;">
             <form id="update-payment-form">
 <div style="margin-bottom: 15px; text-align: center;">
     <div style="display: inline-block; text-align: left;">
-        <h4 style="margin-bottom: 10px;">Select Months to Pay:</h4>
+        <h4 style="margin-bottom: 10px;">Pay For:</h4>
         ' . $checkbox_html . '
     </div>
 </div>
@@ -638,7 +655,7 @@ echo '<div id="update-payment-modal" style="display: none;">
     <div style="display: inline-block; text-align: left;">
         <h4 style="margin-bottom: 10px;">Select Payment Method</h4>
         <label style="display: block; margin: 5px 0;">
-            <input type="radio" name="payment_method" value="cash" required> Cash
+            <input type="radio" name="payment_method" value="cash" checked required> Cash
         </label>
         <label style="display: block; margin: 5px 0;">
             <input type="radio" name="payment_method" value="bank transfer"> Bank Transfer
@@ -648,7 +665,13 @@ echo '<div id="update-payment-modal" style="display: none;">
         </label>
     </div>
 </div>
+<div>
+ <p><strong>Student ID:</strong> ' . esc_html($custom_student_id) . '</p>
+                     <p><strong>Class Name:</strong> ' . esc_html($class_name) . '</p>
+                    <p><strong>Instructor Name:</strong> ' . esc_html($instructor_name) . '</p>
+<p id="pay-amount"><strong>Pay Amount:</strong> Rs. ' . esc_html($due_amount) . '</p>
 
+</div>
 
                 <div style="margin-top: 15px;">
                     <button type="submit" class="button button-primary">Submit Payment</button>
@@ -662,6 +685,20 @@ echo '<div id="update-payment-modal" style="display: none;">
 // JavaScript for handling the modal and AJAX
 echo "<script>
     jQuery(document).ready(function($) {
+        var paymentOption = '" . $js_payment_option . "';
+        var totalDueAmount = parseFloat('" . $due_amount . "');
+
+        function calculateAndDisplayMonthlyAmount() {
+            var totalCheckboxes = $('input[name=\"payment_months[]\"]').length;
+
+            if (paymentOption === 'monthly' && totalCheckboxes > 0) {
+                var monthlyAmount = (totalDueAmount / totalCheckboxes).toFixed(2);
+                $('#pay-amount').text('Pay Amount: Rs. ' + monthlyAmount);
+            } else {
+                $('#pay-amount').text('Pay Amount: Rs. ' + totalDueAmount.toFixed(2));
+            }
+        }
+
         // Show the success modal
         $('#student-success-modal').fadeIn();
 
@@ -673,6 +710,20 @@ echo "<script>
         // Open update payment modal
         $('#update-payment-button').on('click', function() {
             $('#update-payment-modal').fadeIn();
+
+            if (paymentOption === 'full') {
+                $('input[name=\"payment_months[]\"]').each(function() {
+                    $(this).prop('checked', true).prop('disabled', true);
+                });
+            } else if (paymentOption === 'monthly') {
+                var checkboxes = $('input[name=\"payment_months[]\"]');
+                checkboxes.prop('checked', false).prop('disabled', true);
+                checkboxes.first().prop('checked', true).prop('disabled', false);
+            } else {
+                $('input[name=\"payment_months[]\"]').prop('disabled', false);
+            }
+
+            calculateAndDisplayMonthlyAmount(); // Update pay amount
         });
 
         // Close update payment modal
@@ -684,13 +735,11 @@ echo "<script>
         $('#update-payment-form').on('submit', function(e) {
             e.preventDefault();
 
-            // Get the selected months from the checkboxes
             var selectedMonths = [];
             $('input[name=\"payment_months[]\"]:checked').each(function() {
                 selectedMonths.push($(this).val());
             });
 
-            // Send AJAX request to update the database
             $.ajax({
                 url: '" . admin_url('admin-ajax.php') . "',
                 type: 'POST',
@@ -703,8 +752,7 @@ echo "<script>
                 success: function(response) {
                     if (response.success) {
                         alert('Payment updated successfully!');
-                        
-                        // Now, fetch the updated payment details to display in the modal
+
                         $.ajax({
                             url: '" . admin_url('admin-ajax.php') . "',
                             type: 'POST',
@@ -714,15 +762,14 @@ echo "<script>
                             },
                             success: function(response) {
                                 if (response.success) {
-                                    // Update the Payment Summary in the success modal with the new details
                                     $('#payment-summary').html(response.data.payment_summary);
+                                    $('#update-payment-button').hide();
                                 } else {
                                     alert('Failed to fetch updated payment details.');
                                 }
                             }
                         });
 
-                        // Close the update payment modal
                         $('#update-payment-modal').fadeOut();
                     } else {
                         alert('There was an error updating the payment.');
@@ -732,6 +779,7 @@ echo "<script>
         });
     });
 </script>";
+
 
 
 
