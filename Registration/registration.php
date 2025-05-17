@@ -1,5 +1,6 @@
 <?php
 
+
 // Create table
 function student_registration_install() {
     global $wpdb;
@@ -1239,7 +1240,7 @@ echo '
         <p id="modal_amount_display"></p>
 
 <label for="modal_payment_method">Select Payment Method:</label><br>
-<input type="radio" id="cash" name="payment_method" value="cash" required>
+<input type="radio" id="cash" name="payment_method" value="cash" checked required>
 <label for="cash">Cash</label><br>
 
 <input type="radio" id="banktransfer" name="payment_method" value="banktransfer">
@@ -1469,6 +1470,11 @@ function daily_financial_report() {
     ?>
     <div class="wrap">
         <h1>Daily Financial Report</h1>
+            <style>
+            .payment-label-bold {
+                font-weight: bold;
+            }
+        </style>
 
         <form id="financial-report-form">
             <label for="start_date">Start Date:</label>
@@ -1487,37 +1493,59 @@ function daily_financial_report() {
         </div>
     </div>
 
-    <script>
-        jQuery(document).ready(function($) {
-            function fetchFinancialReport() {
-                const start = $('#start_date').val();
-                const end = $('#end_date').val();
+<script>
+    jQuery(document).ready(function($) {
+        // Set default date values to today
+        const today = new Date().toISOString().split('T')[0];
+        $('#start_date').val(today);
+        $('#end_date').val(today);
 
-                if (!start || !end) return;
+        // Fetch report on initial load
+        fetchFinancialReport();
 
-                $.ajax({
-                    url: ajaxurl,
-                    method: 'POST',
-                    data: {
-                        action: 'get_financial_report',
-                        start_date: start,
-                        end_date: end
-                    },
-                    success: function(response) {
-                        $('#report-results').html(response.data.html);
-                        $('#report-summary').html('');
+        // Fetch when either date changes
+        $('#start_date, #end_date').on('change', fetchFinancialReport);
 
-                        $('input[name="payment_method"]').on('change', function() {
-                            $('#report-summary').html(response.data.summaries[$(this).val()]);
-                        });
-                    }
-                });
-            }
+        function fetchFinancialReport() {
+            const start = $('#start_date').val();
+            const end = $('#end_date').val();
 
-            // Trigger fetch when either date changes
-            $('#start_date, #end_date').on('change', fetchFinancialReport);
-        });
-    </script>
+            if (!start || !end) return;
+
+            $.ajax({
+                url: ajaxurl,
+                method: 'POST',
+                data: {
+                    action: 'get_financial_report',
+                    start_date: start,
+                    end_date: end
+                },
+                success: function(response) {
+                    $('#report-results').html(response.data.html);
+                    $('#report-summary').html('');
+
+                    // Attach event listener to payment method radios
+                    $('input[name="payment_method"]').on('change', function() {
+                            // Remove bold from all labels first
+                          $('input[name="payment_method"]').each(function() {
+                              $(this).parent('label').removeClass('payment-label-bold');
+                          });
+
+                          // Add bold to the selected one
+                          $(this).parent('label').addClass('payment-label-bold');
+
+                          // Show corresponding summary
+                          $('#report-summary').html(response.data.summaries[$(this).val()]);
+                         });
+
+                    // Auto-select 'cash' radio and trigger change
+                    $('input[name="payment_method"][value="cash"]').prop('checked', true).trigger('change');
+                }
+            });
+        }
+    });
+</script>
+
     <?php
 }
 
@@ -1614,12 +1642,28 @@ foreach ($summaries as $key => $table) {
 
     ob_start();
     ?>
-    <div>
-        <label><input type="radio" name="payment_method" value="cash"> Cash Payments: <?php echo number_format($totals['cash'], 2); ?></label><br>
-        <label><input type="radio" name="payment_method" value="banktransfer"> Bank Transfers: <?php echo number_format($totals['banktransfer'], 2); ?></label><br>
-        <label><input type="radio" name="payment_method" value="card"> Card Payments: <?php echo number_format($totals['card'], 2); ?></label><br><br>
-        <strong>Total: <?php echo number_format($total_all, 2); ?></strong>
+<div style="max-width: 400px;">
+    <?php
+    $methods = [
+        'cash' => 'Cash Payments',
+        'banktransfer' => 'Bank Transfers',
+        'card' => 'Card Payments'
+    ];
+    foreach ($methods as $key => $label): ?>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0;">
+            <label style="flex: 1;">
+                <input type="radio" name="payment_method" value="<?php echo $key; ?>"> <?php echo $label; ?>
+            </label>
+            <div style="text-align: right; min-width: 100px;">
+                <?php echo number_format($totals[$key], 2); ?>
+            </div>
+        </div>
+    <?php endforeach; ?>
+    <div style="margin-top: 10px; font-weight: bold; text-align: right;">
+        Total: <?php echo number_format($total_all, 2); ?>
     </div>
+</div>
+
     <?php
     $html = ob_get_clean();
 
