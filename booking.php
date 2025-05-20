@@ -1,5 +1,6 @@
 <?php   
 
+
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -1321,7 +1322,7 @@ function save_booking() {
     $booking_type = sanitize_text_field($_POST['booking_type']);
     $description = sanitize_textarea_field($_POST['description']);
     $course_fee = isset($_POST['course_fee']) ? floatval($_POST['course_fee']) : 0;
-    $discount_percent = isset($_POST['discount_percent']) ? floatval($_POST['discount_percent']) : 0;
+    $discount_amount = isset($_POST['discount_amount_hidden']) ? floatval($_POST['discount_amount_hidden']) : 0;
 
     // Get customer email from wp_booking_customers table
     $customer_email = $wpdb->get_var(
@@ -1416,6 +1417,7 @@ function save_booking() {
             return;
         }
 
+        $month_name = date('F Y', strtotime($booking_date));
         // Insert booking
         $wpdb->insert(
             $wpdb->prefix . 'booking_calendar',
@@ -1432,7 +1434,8 @@ function save_booking() {
                 'description' => $description,
                 'description_code_id' => $description_code_id, // Save description code ID
                 'course_fee' => $course_fee,
-                'discount_percent' => $discount_percent
+                'discount_amount' => $discount_amount,
+                'month_name' => $month_name
             )
         );
 
@@ -1468,13 +1471,14 @@ $per_day_cost = isset($_POST['per_day_cost']) ? floatval($_POST['per_day_cost'])
     if (!$skip_invoices) {
     foreach ($monthly_bookings as $month => $dates) {
         $count = count($dates);
-$amount = $count * $selected_slot_count * $per_day_cost;
+$amount = $count * $per_day_cost;
 
-if ($discount_percent > 0) {
-    $discounted_amount = round($amount * (1 - $discount_percent / 100), 2);
+if ($discount_amount > 0 && $discount_amount < $amount) {
+    $discounted_amount = $amount;
 } else {
     $discounted_amount = $amount;
 }
+
 
 $total_amount += $discounted_amount;
 
@@ -1485,17 +1489,23 @@ $total_amount += $discounted_amount;
 
         // Insert invoice for each booking_id
         $invoice_sent_at = current_time('mysql'); // Get current time in MySQL format
-        foreach ($booking_ids as $booking_id) {
-            $wpdb->insert(
-                $wpdb->prefix . 'booking_invoices',
-                array(
-                    'booking_id' => $booking_id,
-                    'invoice_number' => $invoice_number,
-                    'amount' => $discounted_amount,
-                    'invoice_sent_at' => $invoice_sent_at // Store timestamp when invoice is sent
-                )
-            );
-        }
+$month_name = date('F', strtotime($month)); // e.g., "May"
+$year = date('Y', strtotime($month)); // e.g., "2025"
+$full_month_label = $month_name . ' ' . $year; // e.g., "May 2025"
+
+foreach ($booking_ids as $booking_id) {
+    $wpdb->insert(
+        $wpdb->prefix . 'booking_invoices',
+        array(
+            'booking_id' => $booking_id,
+            'invoice_number' => $invoice_number,
+            'amount' => $discounted_amount,
+            'invoice_sent_at' => $invoice_sent_at,
+            'month_name' => $full_month_label // Save the month name of the invoice
+        )
+    );
+}
+
 
         $invoice_id = $wpdb->insert_id;
         $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
@@ -1507,7 +1517,7 @@ $total_amount += $discounted_amount;
             send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
 
             // Schedule reminder email 3 minutes after the first invoice email
-            wp_schedule_single_event(time() + 60 * 60 * 24, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Schedule subsequent invoice emails with a delay
@@ -1515,11 +1525,11 @@ $total_amount += $discounted_amount;
             wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
             // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-            wp_schedule_single_event(time() + $delay_counter + 60 * 60 * 24, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Increment delay by 2 minutes (120 seconds) for each subsequent email
-        $delay_counter += 60 * 60 * 60 * 60; // 2 minutes (120 seconds)
+        $delay_counter += 2 * 60 ; // 2 minutes (120 seconds)
     }
 
         // Update the invoice counter in options
@@ -2617,29 +2627,7 @@ echo '</select>
     <label>Available Time Slots:</label>
     <div id="availableSlots" style="margin-bottom: 2px;"></div>
 </div>
-<div><p id="selectedAmount" style="font-weight: bold;">Per Day Cost: Rs. 0</p>
-<p id="monthlyCost" style="font-weight: bold;">Monthly Cost: Rs. 0</p></div>
-<div style="margin-top:10px;">
-    <label>
-        <input type="checkbox" id="enableDiscount" onchange="toggleDiscountInput()"> Apply Discount
-    </label>
-</div>
-
-<div id="discountSection" style="display: none; margin-top: 10px;">
-    <label for="discountPercent">Discount (%):</label>
-    <input type="number" id="discountPercent" min="0" max="100" value="0" onchange="applyDiscount()" style="width: 60px; margin-left: 5px;">
-</div>
-
-<div id="discountedCost" style="margin-top: 10px; font-weight: bold;"></div>
-<input type="hidden" name="selected_slot_count" id="selected_slot_count" value="0" />
-<input type="hidden" name="per_day_cost" id="per_day_cost" value="0" />
-<input type="hidden" name="discount_percent" id="discount_percent_hidden" value="0">
-
-
-
-      
-
-                    <div style="display: flex; justify-content: space-between; gap: 10px;">
+<div style="display: flex; justify-content: space-between; gap: 10px;">
                         <div style="flex: 1;">
                             <label for="start_time">Start Time:</label>
                             <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;" step="3600" readonly onkeydown="return false;">
@@ -2649,7 +2637,30 @@ echo '</select>
                             <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;" step="3600" readonly onkeydown="return false;">
                         </div>
                     </div>
-                    
+                    <h3>Financial Information</h3><div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
+<div><p id="selectedAmount" style="font-weight: bold;">Per Hourly Cost: Rs. 0</p>
+<p id="monthlyCost" style="font-weight: bold;">Monthly Cost: Rs. 0</p></div>
+<div style="margin-top:10px;">
+    <label>
+        <input type="checkbox" id="enableDiscount" onchange="toggleDiscountInput()"> Apply Discount
+    </label>
+</div>
+
+<div id="discountSection" style="display: none; margin-top: 10px;">
+    <label for="discountAmount">Discount Amount (Rs.):</label>
+    <input type="number" id="discountAmount" min="0" value="0" onchange="applyDiscount()" style="width: 100px; margin-left: 5px;">
+</div>
+
+<div id="discountedCost" style="margin-top: 10px; font-weight: bold;"></div>
+<input type="hidden" name="selected_slot_count" id="selected_slot_count" value="0" />
+<input type="hidden" name="per_day_cost" id="per_day_cost" value="0" />
+<input type="hidden" name="discount_amount_hidden" id="discount_amount_hidden" value="0" />
+</div>
+
+
+
+
+
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
                         <input type="submit" value="Save Booking" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">
                         <button type="button" onclick="closeBookingModal()" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">Close</button>
@@ -3076,15 +3087,14 @@ function get_available_workspace_conference_slots() {
 }
 
 
-// JavaScript for booking modal handling
 function booking_calendar_modal_js() { 
     ?>
     <script type="text/javascript">
-        // Function to show the booking modal
+
 function calculateMonthlyCost(startDateStr, endDateStr, selectedSlotCount) {
     const startDate = new Date(startDateStr);
     const endDate = new Date(endDateStr);
-    const targetDay = startDate.getDay(); // Same weekday as start date
+    const targetDay = startDate.getDay();
     const monthBreakdown = {};
     const tempDate = new Date(startDate);
 
@@ -3099,31 +3109,43 @@ function calculateMonthlyCost(startDateStr, endDateStr, selectedSlotCount) {
         tempDate.setDate(tempDate.getDate() + 1);
     }
 
-    // Store breakdown for reuse in discount calculation
     window.lastMonthBreakdown = monthBreakdown;
     window.lastSelectedSlotCount = selectedSlotCount;
 
+    const discountAmount = parseFloat(document.getElementById("discountAmount")?.value) || 0;
+    const baseRate = 3000;
+    const perSlotCost = baseRate - discountAmount;
+
     let breakdownHtml = "";
     let total = 0;
-    for (const [month, weekCount] of Object.entries(monthBreakdown)) {
-        const cost = weekCount * selectedSlotCount * 3000;
-        total += cost;
-        breakdownHtml += `<div>${month}: Rs. ${cost.toLocaleString()}</div>`;
+
+    // Only build the breakdown if discount is NOT enabled
+    const isDiscountEnabled = document.getElementById("enableDiscount")?.checked;
+
+    if (!isDiscountEnabled) {
+        for (const [month, weekCount] of Object.entries(monthBreakdown)) {
+            const cost = weekCount * selectedSlotCount * perSlotCost;
+            total += cost;
+            breakdownHtml += `<div>${month}: Rs. ${cost.toLocaleString()}</div>`;
+        }
+
+        breakdownHtml += `<strong>Total Monthly Cost: Rs. ${total.toLocaleString()}</strong>`;
+        document.getElementById("monthlyCost").innerHTML = breakdownHtml;
+    } else {
+        document.getElementById("monthlyCost").innerHTML = ""; // Hide default cost if discount applied
     }
+
     window.lastMonthlyTotal = total;
+    window.lastPerSlotCost = perSlotCost;
 
-    breakdownHtml += `<strong>Total Monthly Cost: Rs. ${total.toLocaleString()}</strong>`;
-    document.getElementById("monthlyCost").innerHTML = breakdownHtml;
-
-    if (document.getElementById("enableDiscount")?.checked) {
-        applyDiscount(); // Apply discount to updated monthly breakdown
+    // Always recalculate the discounted value if enabled
+    if (isDiscountEnabled) {
+        applyDiscount();
     } else {
         document.getElementById("discountedCost").innerHTML = '';
     }
 }
 
-
-let lastMonthlyTotal = 0;
 
 
 function toggleDiscountInput() {
@@ -3137,17 +3159,19 @@ function toggleDiscountInput() {
 }
 
 function applyDiscount() {
-    const discountPercent = parseFloat(document.getElementById("discountPercent").value) || 0;
+    const discountAmount = parseFloat(document.getElementById("discountAmount").value) || 0;
+    const baseRate = 3000;
+    const perSlotCost = baseRate - discountAmount;
 
     if (!window.lastMonthBreakdown || window.lastSelectedSlotCount === undefined) {
         document.getElementById("discountedCost").innerHTML = '';
-        document.getElementById("discount_percent_hidden").value = 0;
+        document.getElementById("discount_amount_hidden").value = 0;
         return;
     }
 
-    if (discountPercent < 0 || discountPercent > 100) {
-        document.getElementById("discountedCost").innerHTML = "Invalid discount percentage.";
-        document.getElementById("discount_percent_hidden").value = 0;
+    if (discountAmount < 0 || discountAmount > baseRate) {
+        document.getElementById("discountedCost").innerHTML = "Invalid discount amount.";
+        document.getElementById("discount_amount_hidden").value = 0;
         return;
     }
 
@@ -3155,26 +3179,81 @@ function applyDiscount() {
     let discountedTotal = 0;
 
     for (const [month, weekCount] of Object.entries(window.lastMonthBreakdown)) {
-        const original = weekCount * window.lastSelectedSlotCount * 3000;
-        const discounted = Math.round(original * (1 - discountPercent / 100));
-        discountedTotal += discounted;
-        discountedHtml += `<div>${month}: Rs. ${discounted.toLocaleString()} (Discounted)</div>`;
+        const reduced = weekCount * window.lastSelectedSlotCount * perSlotCost;
+        discountedHtml += `<div>${month}: Rs. ${reduced.toLocaleString()} (Discounted)</div>`;
+        discountedTotal += reduced;
     }
 
     discountedHtml += `<strong>Total Discounted Cost: Rs. ${discountedTotal.toLocaleString()}</strong>`;
     document.getElementById("discountedCost").innerHTML = discountedHtml;
 
-    // Update hidden input with discount percentage
-    document.getElementById("discount_percent_hidden").value = discountPercent;
+    document.getElementById("discount_amount_hidden").value = discountAmount;
+
+    // Update per-day cost as well
+    updatePerDayCostDisplay(perSlotCost);
 }
 
 
+function updateStartEndTime() {
+    const allSlots = Array.from(document.querySelectorAll('input[name="time_slot[]"], input[name="selected_slots[]"]'));
+    const checkedSlots = allSlots.filter(cb => cb.checked);
 
+    if (checkedSlots.length === 0) {
+        document.getElementById("start_time").value = '';
+        document.getElementById("end_time").value = '';
+        document.getElementById("selectedAmount").textContent = `Per Hourly Cost: Rs. 0`;
+        document.getElementById("monthlyCost").textContent = `Monthly Cost: Rs. 0`;
+        return;
+    }
+
+    const slotValues = allSlots.map(cb => cb.value);
+    const checkedValues = checkedSlots.map(cb => cb.value);
+    const firstCheckedIndex = slotValues.indexOf(checkedValues[0]);
+    const lastCheckedIndex = slotValues.indexOf(checkedValues[checkedValues.length - 1]);
+
+    for (let i = firstCheckedIndex; i <= lastCheckedIndex; i++) {
+        allSlots[i].checked = true;
+    }
+
+    const updatedCheckedSlots = allSlots.slice(firstCheckedIndex, lastCheckedIndex + 1);
+    const times = updatedCheckedSlots.map(cb => {
+        const [start, end] = cb.value.split(" - ");
+        return { start, end };
+    });
+
+    document.getElementById("start_time").value = times[0].start;
+    document.getElementById("end_time").value = times[times.length - 1].end;
+
+    const discountAmount = parseFloat(document.getElementById("discountAmount")?.value) || 0;
+    const perSlotCost = 3000 - discountAmount;
+    const totalAmount = updatedCheckedSlots.length * perSlotCost;
+
+    document.getElementById("selectedAmount").textContent = `Per Hourly Cost: Rs. ${totalAmount}`;
+    document.getElementById('selected_slot_count').value = updatedCheckedSlots.length;
+    document.getElementById('per_day_cost').value = totalAmount;
+
+    const selectedSlotCount = updatedCheckedSlots.length;
+    const startDateStr = document.getElementById("start_date").value;
+    const endDateStr = document.getElementById("end_date")?.value;
+
+    if (startDateStr && endDateStr) {
+        calculateMonthlyCost(startDateStr, endDateStr, selectedSlotCount);
+    } else {
+        document.getElementById("monthlyCost").textContent = `Monthly Cost: Rs. 0`;
+    }
+}
+
+function updatePerDayCostDisplay(perSlotCost) {
+    const selectedSlotCount = parseInt(document.getElementById('selected_slot_count')?.value || 0);
+    const total = selectedSlotCount * perSlotCost;
+    document.getElementById("selectedAmount").textContent = `Per Hourly Cost: Rs. ${total}`;
+    document.getElementById('per_day_cost').value = total;
+}
 
 
 function showBookingModal(date, availableSlots) {
     var currentDate = new Date().toISOString().split('T')[0];
-    
+
     if (date < currentDate) {
         alert("Cannot book for past dates.");
         return;
@@ -3189,7 +3268,6 @@ function showBookingModal(date, availableSlots) {
     slotsContainer.innerHTML = "";
 
     if (availableSlots && availableSlots.trim() !== "") {
-        // Show available server-provided slots
         let slotsArray = availableSlots.split(",");
         slotsArray.forEach(slot => {
             let slotElement = document.createElement("div");
@@ -3213,7 +3291,6 @@ function showBookingModal(date, availableSlots) {
         slotsContainer.style.display = "block";
 
     } else {
-        // No available slots => show default hourly checkboxes
         for (let hour = 8; hour < 19; hour++) {
             let start = `${hour.toString().padStart(2, '0')}:00`;
             let end = `${(hour + 1).toString().padStart(2, '0')}:00`;
@@ -3224,7 +3301,7 @@ function showBookingModal(date, availableSlots) {
 
             let checkbox = document.createElement("input");
             checkbox.type = "checkbox";
-            checkbox.name = "time_slot[]"; // different name for default slots
+            checkbox.name = "time_slot[]";
             checkbox.value = slot;
             checkbox.addEventListener('change', updateStartEndTime);
 
@@ -3244,82 +3321,19 @@ function showBookingModal(date, availableSlots) {
 }
 
 
-
-
-        // Function to update start_time and end_time based on selected slots
-function updateStartEndTime() {
-    // Combine both types of checkboxes
-    const allSlots = Array.from(document.querySelectorAll('input[name="time_slot[]"], input[name="selected_slots[]"]'));
-    const checkedSlots = allSlots.filter(cb => cb.checked);
-
-    if (checkedSlots.length === 0) {
-        document.getElementById("start_time").value = '';
-        document.getElementById("end_time").value = '';
-        document.getElementById("selectedAmount").textContent = `Per Day Cost: Rs. 0`;
-        document.getElementById("monthlyCost").textContent = `Monthly Cost: Rs. 0`;
-        return;
-    }
-
-    // Get indexes of all slots and checked slots
-    const slotValues = allSlots.map(cb => cb.value);
-    const checkedValues = checkedSlots.map(cb => cb.value);
-
-    // Find the first and last checked index
-    const firstCheckedIndex = slotValues.indexOf(checkedValues[0]);
-    const lastCheckedIndex = slotValues.indexOf(checkedValues[checkedValues.length - 1]);
-
-    // Select all checkboxes in between
-    for (let i = firstCheckedIndex; i <= lastCheckedIndex; i++) {
-        allSlots[i].checked = true;
-    }
-
-    // Recalculate start and end time
-    const updatedCheckedSlots = allSlots.slice(firstCheckedIndex, lastCheckedIndex + 1);
-    const times = updatedCheckedSlots.map(cb => {
-        const [start, end] = cb.value.split(" - ");
-        return { start, end };
-    });
-
-    document.getElementById("start_time").value = times[0].start;
-    document.getElementById("end_time").value = times[times.length - 1].end;
-
-    // Update amount based on new checked slots
-    const totalAmount = updatedCheckedSlots.length * 3000;
-    document.getElementById("selectedAmount").textContent = `Per Day Cost: Rs. ${totalAmount}`;
-    
-        // Set hidden inputs
-    document.getElementById('selected_slot_count').value = updatedCheckedSlots.length;
-    document.getElementById('per_day_cost').value = totalAmount;
-
-        // Monthly cost
-    const selectedSlotCount = updatedCheckedSlots.length;
-    const startDateStr = document.getElementById("start_date").value;
-    const endDateStr = document.getElementById("end_date")?.value;
-
-    if (startDateStr && endDateStr) {
-        calculateMonthlyCost(startDateStr, endDateStr, selectedSlotCount);
-    } else {
-        document.getElementById("monthlyCost").textContent = `Monthly Cost: Rs. 0`;
-    }
-
+function closeBookingModal() {
+    document.getElementById('bookingModal').style.display = 'none';
 }
 
-
-
-        function closeBookingModal() {
-            document.getElementById('bookingModal').style.display = 'none';
+document.addEventListener("DOMContentLoaded", function () {
+    document.addEventListener("change", function (event) {
+        if (event.target.matches('input[name="selected_slots[]"]')) {
+            updateStartEndTime();
         }
+    });
+});
 
-        // Ensure checkboxes work even if dynamically created
-        document.addEventListener("DOMContentLoaded", function () {
-            document.addEventListener("change", function (event) {
-                if (event.target.matches('input[name="selected_slots[]"]')) {
-                    updateStartEndTime();
-                }
-            });
-        });
-
-        jQuery(document).ready(function ($) {
+jQuery(document).ready(function ($) {
     $('#bookingForm').submit(function (e) {
         e.preventDefault();
         
@@ -3329,7 +3343,6 @@ function updateStartEndTime() {
             if (response.success) {
                 window.location.href = response.data.redirect_url;
             } else {
-                // Display the actual error message from the server
                 alert(response.data.message);
             }
         });
@@ -3340,6 +3353,7 @@ function updateStartEndTime() {
     <?php
 }
 add_action('admin_footer', 'booking_calendar_modal_js');
+
 
 
 
