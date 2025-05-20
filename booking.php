@@ -24,7 +24,9 @@ function booking_calendar_install() {
         end_time TIME NOT NULL,
         color VARCHAR(7) NOT NULL,
         booking_type VARCHAR(50) NOT NULL,
-        group_id VARCHAR(64) DEFAULT NULL;
+        group_id VARCHAR(64) DEFAULT NULL,
+        description TEXT DEFAULT NULL,
+        course_fee DECIMAL(10,2) DEFAULT 0,
         PRIMARY KEY (id)
     ) $charset_collate;";
 
@@ -35,7 +37,7 @@ function booking_calendar_install() {
         invoice_number VARCHAR(20) NOT NULL,
         amount DECIMAL(10,2) NOT NULL,
         date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        payment_slip VARCHAR(255).,
+        payment_slip VARCHAR(255),
         payment_status VARCHAR(20) DEFAULT 'Pending',  // Added payment_status column
         reminder_count INT DEFAULT 0,
         PRIMARY KEY (id),
@@ -115,7 +117,12 @@ add_action('admin_menu', 'booking_calendar_menu');
 function restrict_dashboard_for_editors() {
     if (current_user_can('editor')) { // Apply only for Editors
         global $menu;
-        $allowed_menus = ['booking-calendar']; // Allow only Booking Calendar Plugin
+        
+        // Allow these menus for Editors
+        $allowed_menus = [
+            'booking-calendar',        // Your Booking Calendar plugin
+            'student-registration'     // Your Student Registration plugin (this slug must match!)
+        ];
 
         foreach ($menu as $key => $item) {
             if (!in_array($item[2], $allowed_menus)) {
@@ -125,6 +132,7 @@ function restrict_dashboard_for_editors() {
     }
 }
 add_action('admin_menu', 'restrict_dashboard_for_editors', 999);
+
 
 
 function customer_registration_page() {
@@ -1301,7 +1309,7 @@ register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
 
 
-function save_booking() {
+function save_booking() {   
     global $wpdb;
 
     // Get data from the AJAX request
@@ -1311,6 +1319,9 @@ function save_booking() {
     $start_date = sanitize_text_field($_POST['start_date']); 
     $end_date = sanitize_text_field($_POST['end_date']);
     $booking_type = sanitize_text_field($_POST['booking_type']);
+    $description = sanitize_textarea_field($_POST['description']);
+    $course_fee = isset($_POST['course_fee']) ? floatval($_POST['course_fee']) : 0;
+    $discount_percent = isset($_POST['discount_percent']) ? floatval($_POST['discount_percent']) : 0;
 
     // Get customer email from wp_booking_customers table
     $customer_email = $wpdb->get_var(
@@ -1320,20 +1331,16 @@ function save_booking() {
         )
     );
 
-
     // Get customer type
-$customer_type = $wpdb->get_var(
-    $wpdb->prepare(
-        "SELECT customer_type FROM {$wpdb->prefix}booking_customers WHERE customer_email = %s LIMIT 1",
-        $customer_email
-    )
-);
+    $customer_type = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT customer_type FROM {$wpdb->prefix}booking_customers WHERE customer_email = %s LIMIT 1",
+            $customer_email
+        )
+    );
 
-
-// Check if invoices should be skipped (only for makerspace customers)
-$skip_invoices = strtolower($customer_type) === 'makerspace';
-
-
+    // Check if invoices should be skipped (only for makerspace customers)
+    $skip_invoices = strtolower($customer_type) === 'makerspace';
 
     // Check if the customer is restricted
     $is_restricted = $wpdb->get_var(
@@ -1370,6 +1377,14 @@ $skip_invoices = strtolower($customer_type) === 'makerspace';
 
     $color = sprintf("#%02X%02X%02X", $r, $g, $b);
 
+    // Create description code ID (using the initials of the description)
+    $description_initials = strtoupper(implode('', array_map(function ($word) {
+        return strtoupper($word[0]);
+    }, explode(' ', $description))));
+
+    // Set the description_code_id to just the initials (no number increments)
+    $description_code_id = $description_initials;
+
     $booking_dates = []; // Track all the booking dates
     $current_date = clone $start_date_obj;
 
@@ -1377,9 +1392,9 @@ $skip_invoices = strtolower($customer_type) === 'makerspace';
     $booking_ids = [];
     
     $group_id = null;
-if (strtolower($booking_type) === 'class rent') {
-    $group_id = uniqid('class_', true); // You can customize this format
-}
+    if (strtolower($booking_type) === 'class rent') {
+        $group_id = uniqid('class_', true); // You can customize this format
+    }
 
     while ($current_date <= $end_date_obj) {
         $booking_date = $current_date->format('Y-m-d');
@@ -1403,20 +1418,23 @@ if (strtolower($booking_type) === 'class rent') {
 
         // Insert booking
         $wpdb->insert(
-    $wpdb->prefix . 'booking_calendar',
-    array(
-        'customer_name' => $customer_name,
-        'start_time' => $start_time,
-        'end_time' => $end_time,
-        'booking_date' => $booking_date,
-        'start_date' => $start_date_obj->format('Y-m-d'),
-        'end_date' => $end_date_obj->format('Y-m-d'),
-        'color' => $color,
-        'booking_type' => $booking_type,
-        'group_id' => $group_id // <-- add this
-    )
-);
-
+            $wpdb->prefix . 'booking_calendar',
+            array(
+                'customer_name' => $customer_name,
+                'start_time' => $start_time,
+                'end_time' => $end_time,
+                'booking_date' => $booking_date,
+                'start_date' => $start_date_obj->format('Y-m-d'),
+                'end_date' => $end_date_obj->format('Y-m-d'),
+                'color' => $color,
+                'booking_type' => $booking_type,
+                'group_id' => $group_id,
+                'description' => $description,
+                'description_code_id' => $description_code_id, // Save description code ID
+                'course_fee' => $course_fee,
+                'discount_percent' => $discount_percent
+            )
+        );
 
         // Collect booking date and booking_id
         $booking_ids[] = $wpdb->insert_id;
@@ -1444,11 +1462,22 @@ if (strtolower($booking_type) === 'class rent') {
     // Counter for delay in seconds (2-minute delay between each email)
     $delay_counter = 0;
 
+$selected_slot_count = isset($_POST['selected_slot_count']) ? intval($_POST['selected_slot_count']) : 0;
+$per_day_cost = isset($_POST['per_day_cost']) ? floatval($_POST['per_day_cost']) : 0;
+     
     if (!$skip_invoices) {
     foreach ($monthly_bookings as $month => $dates) {
         $count = count($dates);
-        $amount = $count * 4000;
-        $total_amount += $amount;
+$amount = $count * $selected_slot_count * $per_day_cost;
+
+if ($discount_percent > 0) {
+    $discounted_amount = round($amount * (1 - $discount_percent / 100), 2);
+} else {
+    $discounted_amount = $amount;
+}
+
+$total_amount += $discounted_amount;
+
 
         // Generate invoice number
         $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
@@ -1462,7 +1491,7 @@ if (strtolower($booking_type) === 'class rent') {
                 array(
                     'booking_id' => $booking_id,
                     'invoice_number' => $invoice_number,
-                    'amount' => $amount,
+                    'amount' => $discounted_amount,
                     'invoice_sent_at' => $invoice_sent_at // Store timestamp when invoice is sent
                 )
             );
@@ -1478,7 +1507,7 @@ if (strtolower($booking_type) === 'class rent') {
             send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
 
             // Schedule reminder email 3 minutes after the first invoice email
-            wp_schedule_single_event(time() + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + 60 * 60 * 24, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Schedule subsequent invoice emails with a delay
@@ -1486,7 +1515,7 @@ if (strtolower($booking_type) === 'class rent') {
             wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
 
             // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-            wp_schedule_single_event(time() + $delay_counter + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + $delay_counter + 60 * 60 * 24, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
 
         // Increment delay by 2 minutes (120 seconds) for each subsequent email
@@ -1507,6 +1536,7 @@ if (strtolower($booking_type) === 'class rent') {
 }
 
 add_action('wp_ajax_save_booking', 'save_booking');
+
 
 
 
@@ -1761,7 +1791,7 @@ wp_schedule_single_event(time() + 180, 'send_final_warning_and_delete_booking', 
 
     // Schedule next reminder if less than 3 have been sent
     if ($reminder_count + 1 < 3 && !wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount))) {
-        wp_schedule_single_event(time() + 60 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
+        wp_schedule_single_event(time() + 60 * 60 * 24, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
     }
 }
 
@@ -2418,7 +2448,11 @@ $booked_time_str .= '<div ' . $onclick . '
                     $booked_time_str .= '<br><small>Type: ' . esc_html($booking->booking_type) . '</small>';
                     // Retrieve the payment status using the correct column name for matching
                     $payment_status = isset($payment_status_by_booking_id[$booking->id]) ? $payment_status_by_booking_id[$booking->id] : 'Not found';
-                
+                    $booked_time_str .= '<small> ' . esc_html($booking->description) . '</small>';
+                    if (isset($booking->course_fee) && $booking->course_fee !== '') {
+    $booked_time_str .= '<small>Fee: ' . esc_html($booking->course_fee) . '</small>';
+}
+
                     // Display the payment status below the booking type
                     //$booked_time_str .= '<br><small>Status: ' . esc_html($payment_status) . '</small>';
                 
@@ -2560,6 +2594,14 @@ if (!empty($customers)) {
 }
 
 echo '</select>
+                    <!-- Description Field -->
+                   <label for="description">Description:</label>
+                   <textarea name="description" id="description" rows="4" style="width: 100%;" placeholder="Enter a description (optional)"></textarea>
+                   
+                   <!-- Course Fee Field -->
+                   <label for="course_fee">Course Fee:</label>
+                   <input type="number" name="course_fee" id="course_fee" style="width: 100%;" placeholder="Enter course fee" min="0" step="0.01">
+
 
                     <!-- Start and End Date Selectors, initially hidden -->
                     <div id="teacherDateSelectors" style="display: none;">
@@ -2575,6 +2617,26 @@ echo '</select>
     <label>Available Time Slots:</label>
     <div id="availableSlots" style="margin-bottom: 2px;"></div>
 </div>
+<div><p id="selectedAmount" style="font-weight: bold;">Per Day Cost: Rs. 0</p>
+<p id="monthlyCost" style="font-weight: bold;">Monthly Cost: Rs. 0</p></div>
+<div style="margin-top:10px;">
+    <label>
+        <input type="checkbox" id="enableDiscount" onchange="toggleDiscountInput()"> Apply Discount
+    </label>
+</div>
+
+<div id="discountSection" style="display: none; margin-top: 10px;">
+    <label for="discountPercent">Discount (%):</label>
+    <input type="number" id="discountPercent" min="0" max="100" value="0" onchange="applyDiscount()" style="width: 60px; margin-left: 5px;">
+</div>
+
+<div id="discountedCost" style="margin-top: 10px; font-weight: bold;"></div>
+<input type="hidden" name="selected_slot_count" id="selected_slot_count" value="0" />
+<input type="hidden" name="per_day_cost" id="per_day_cost" value="0" />
+<input type="hidden" name="discount_percent" id="discount_percent_hidden" value="0">
+
+
+
       
 
                     <div style="display: flex; justify-content: space-between; gap: 10px;">
@@ -2820,6 +2882,51 @@ document.getElementById("end_date").addEventListener("change", function() {
     }
 });
 </script>';
+echo '
+<style>
+    /* Modal Container */
+    .modal-content {
+        background: #fff;
+        width: 400px;
+        margin: 100px auto;
+        padding: 20px;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        max-height: 80vh; /* Max height to prevent too much vertical expansion */
+        overflow-y: auto;  /* Enable scrolling if content exceeds max height */
+    }
+
+    /* Scrollable Content Area */
+    form {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        flex: 1; /* Take up remaining space */
+    }
+
+    /* Ensure Save and Close buttons are at the bottom */
+    form > div:last-child {
+        margin-top: auto; /* Push buttons to the bottom */
+    }
+
+    /* Button Styling */
+    input[type="submit"], button {
+        background-color: #21759b;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        cursor: pointer;
+        border-radius: 5px;
+    }
+
+    /* Ensure buttons are properly aligned and not stretched */
+    button {
+        width: auto;
+        align-self: flex-end; /* Align Close button to the right */
+    }
+</style>
+';
 
 
 
@@ -2974,6 +3081,97 @@ function booking_calendar_modal_js() {
     ?>
     <script type="text/javascript">
         // Function to show the booking modal
+function calculateMonthlyCost(startDateStr, endDateStr, selectedSlotCount) {
+    const startDate = new Date(startDateStr);
+    const endDate = new Date(endDateStr);
+    const targetDay = startDate.getDay(); // Same weekday as start date
+    const monthBreakdown = {};
+    const tempDate = new Date(startDate);
+
+    while (tempDate <= endDate) {
+        if (tempDate.getDay() === targetDay) {
+            const monthKey = `${tempDate.toLocaleString('default', { month: 'long' })} ${tempDate.getFullYear()}`;
+            if (!monthBreakdown[monthKey]) {
+                monthBreakdown[monthKey] = 0;
+            }
+            monthBreakdown[monthKey]++;
+        }
+        tempDate.setDate(tempDate.getDate() + 1);
+    }
+
+    // Store breakdown for reuse in discount calculation
+    window.lastMonthBreakdown = monthBreakdown;
+    window.lastSelectedSlotCount = selectedSlotCount;
+
+    let breakdownHtml = "";
+    let total = 0;
+    for (const [month, weekCount] of Object.entries(monthBreakdown)) {
+        const cost = weekCount * selectedSlotCount * 3000;
+        total += cost;
+        breakdownHtml += `<div>${month}: Rs. ${cost.toLocaleString()}</div>`;
+    }
+    window.lastMonthlyTotal = total;
+
+    breakdownHtml += `<strong>Total Monthly Cost: Rs. ${total.toLocaleString()}</strong>`;
+    document.getElementById("monthlyCost").innerHTML = breakdownHtml;
+
+    if (document.getElementById("enableDiscount")?.checked) {
+        applyDiscount(); // Apply discount to updated monthly breakdown
+    } else {
+        document.getElementById("discountedCost").innerHTML = '';
+    }
+}
+
+
+let lastMonthlyTotal = 0;
+
+
+function toggleDiscountInput() {
+    const isChecked = document.getElementById("enableDiscount").checked;
+    document.getElementById("discountSection").style.display = isChecked ? "block" : "none";
+    if (!isChecked) {
+        document.getElementById("discountedCost").innerHTML = '';
+    } else {
+        applyDiscount();
+    }
+}
+
+function applyDiscount() {
+    const discountPercent = parseFloat(document.getElementById("discountPercent").value) || 0;
+
+    if (!window.lastMonthBreakdown || window.lastSelectedSlotCount === undefined) {
+        document.getElementById("discountedCost").innerHTML = '';
+        document.getElementById("discount_percent_hidden").value = 0;
+        return;
+    }
+
+    if (discountPercent < 0 || discountPercent > 100) {
+        document.getElementById("discountedCost").innerHTML = "Invalid discount percentage.";
+        document.getElementById("discount_percent_hidden").value = 0;
+        return;
+    }
+
+    let discountedHtml = "<strong>Discounted Monthly Cost:</strong><br>";
+    let discountedTotal = 0;
+
+    for (const [month, weekCount] of Object.entries(window.lastMonthBreakdown)) {
+        const original = weekCount * window.lastSelectedSlotCount * 3000;
+        const discounted = Math.round(original * (1 - discountPercent / 100));
+        discountedTotal += discounted;
+        discountedHtml += `<div>${month}: Rs. ${discounted.toLocaleString()} (Discounted)</div>`;
+    }
+
+    discountedHtml += `<strong>Total Discounted Cost: Rs. ${discountedTotal.toLocaleString()}</strong>`;
+    document.getElementById("discountedCost").innerHTML = discountedHtml;
+
+    // Update hidden input with discount percentage
+    document.getElementById("discount_percent_hidden").value = discountPercent;
+}
+
+
+
+
+
 function showBookingModal(date, availableSlots) {
     var currentDate = new Date().toISOString().split('T')[0];
     
@@ -3057,6 +3255,8 @@ function updateStartEndTime() {
     if (checkedSlots.length === 0) {
         document.getElementById("start_time").value = '';
         document.getElementById("end_time").value = '';
+        document.getElementById("selectedAmount").textContent = `Per Day Cost: Rs. 0`;
+        document.getElementById("monthlyCost").textContent = `Monthly Cost: Rs. 0`;
         return;
     }
 
@@ -3082,6 +3282,26 @@ function updateStartEndTime() {
 
     document.getElementById("start_time").value = times[0].start;
     document.getElementById("end_time").value = times[times.length - 1].end;
+
+    // Update amount based on new checked slots
+    const totalAmount = updatedCheckedSlots.length * 3000;
+    document.getElementById("selectedAmount").textContent = `Per Day Cost: Rs. ${totalAmount}`;
+    
+        // Set hidden inputs
+    document.getElementById('selected_slot_count').value = updatedCheckedSlots.length;
+    document.getElementById('per_day_cost').value = totalAmount;
+
+        // Monthly cost
+    const selectedSlotCount = updatedCheckedSlots.length;
+    const startDateStr = document.getElementById("start_date").value;
+    const endDateStr = document.getElementById("end_date")?.value;
+
+    if (startDateStr && endDateStr) {
+        calculateMonthlyCost(startDateStr, endDateStr, selectedSlotCount);
+    } else {
+        document.getElementById("monthlyCost").textContent = `Monthly Cost: Rs. 0`;
+    }
+
 }
 
 
@@ -3102,7 +3322,7 @@ function updateStartEndTime() {
         jQuery(document).ready(function ($) {
     $('#bookingForm').submit(function (e) {
         e.preventDefault();
-
+        
         var formData = $(this).serialize();
 
         $.post(ajaxurl, formData + '&action=save_booking', function (response) {
