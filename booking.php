@@ -1416,7 +1416,6 @@ function save_booking() {
             wp_send_json_error(['message' => 'Time slot is already booked for this date: ' . $booking_date]);
             return;
         }
-
         $month_name = date('F Y', strtotime($booking_date));
         // Insert booking
         $wpdb->insert(
@@ -1469,68 +1468,80 @@ $selected_slot_count = isset($_POST['selected_slot_count']) ? intval($_POST['sel
 $per_day_cost = isset($_POST['per_day_cost']) ? floatval($_POST['per_day_cost']) : 0;
      
     if (!$skip_invoices) {
-    foreach ($monthly_bookings as $month => $dates) {
-        $count = count($dates);
-$amount = $count * $per_day_cost;
+$month_index = 0;
 
-if ($discount_amount > 0 && $discount_amount < $amount) {
-    $discounted_amount = $amount;
-} else {
-    $discounted_amount = $amount;
-}
+foreach ($monthly_bookings as $month => $dates) {
+    $count = count($dates);
+    $amount = $count * $per_day_cost;
 
+    $discounted_amount = ($discount_amount > 0 && $discount_amount < $amount) ? $amount : $amount;
+    $total_amount += $discounted_amount;
 
-$total_amount += $discounted_amount;
+    $month_name = date('F', strtotime($month));
+    $year = date('Y', strtotime($month));
+    $full_month_label = $month_name . ' ' . $year;
 
+    // Get representative booking ID
+    $representative_booking_id = null;
+    foreach ($booking_ids as $booking_id) {
+        $booking_date = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT booking_date FROM {$wpdb->prefix}booking_calendar WHERE id = %d LIMIT 1",
+                $booking_id
+            )
+        );
+        $booking_month = date('Y-m', strtotime($booking_date));
 
-        // Generate invoice number
+        if ($booking_month === $month) {
+            $representative_booking_id = $booking_id;
+            break;
+        }
+    }
+
+    if ($month_index === 0 && !$skip_invoices) {
+        // Insert into main invoice table
         $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
-        $all_invoice_numbers[] = $invoice_number;
+        $invoice_counter++;
 
-        // Insert invoice for each booking_id
-        $invoice_sent_at = current_time('mysql'); // Get current time in MySQL format
-$month_name = date('F', strtotime($month)); // e.g., "May"
-$year = date('Y', strtotime($month)); // e.g., "2025"
-$full_month_label = $month_name . ' ' . $year; // e.g., "May 2025"
-
-foreach ($booking_ids as $booking_id) {
-    $wpdb->insert(
-        $wpdb->prefix . 'booking_invoices',
-        array(
-            'booking_id' => $booking_id,
-            'invoice_number' => $invoice_number,
-            'amount' => $discounted_amount,
-            'invoice_sent_at' => $invoice_sent_at,
-            'month_name' => $full_month_label // Save the month name of the invoice
-        )
-    );
-}
-
+        $wpdb->insert(
+            $wpdb->prefix . 'booking_invoices',
+            array(
+                'booking_id' => $representative_booking_id,
+                'invoice_number' => $invoice_number,
+                'amount' => $discounted_amount,
+                'month_name' => $full_month_label,
+                'invoice_sent_at' => current_time('mysql')
+            )
+        );
 
         $invoice_id = $wpdb->insert_id;
         $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
 
-        $invoice_counter++;
-
-        // Send invoice emails and schedule reminder checks
-        if ($customer_email && $delay_counter == 0) {
+        if ($customer_email) {
             send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
-
-            // Schedule reminder email 3 minutes after the first invoice email
-            wp_schedule_single_event(time() + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
+            wp_schedule_single_event(time() + 60 * 3, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0], $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
         }
+    } else {
+        // Store in draft table
+        $wpdb->insert(
+            $wpdb->prefix . 'booking_draft_invoices',
+            array(
+                'booking_id' => $representative_booking_id,
+                'amount' => $discounted_amount,
+                'month_name' => $full_month_label,
+                'schedule_at' => date('Y-m-d H:i:s', time() + $delay_counter),
 
-        // Schedule subsequent invoice emails with a delay
-        if ($customer_email && $delay_counter > 0) {
-            wp_schedule_single_event(time() + $delay_counter, 'send_subsequent_invoice_email', array($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates));
+            )
+        );
 
-            // Schedule reminder email 3 minutes after the subsequent invoice email is sent
-            wp_schedule_single_event(time() + $delay_counter + 3 * 60, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
-        }
-
-        // Increment delay by 2 minutes (120 seconds) for each subsequent email
-        $delay_counter += 2 * 60 ; // 2 minutes (120 seconds)
+        // Schedule the job that will later move this to wp_booking_invoices and send email
+        wp_schedule_single_event(time() + $delay_counter, 'generate_and_send_delayed_invoice', array($wpdb->insert_id));
     }
+
+    $delay_counter += 60 * 2;
+    $month_index++;
+}
+
 
         // Update the invoice counter in options
         update_option('invoice_counter', $invoice_counter);
@@ -1547,6 +1558,101 @@ foreach ($booking_ids as $booking_id) {
 
 add_action('wp_ajax_save_booking', 'save_booking');
 
+add_action('generate_and_send_delayed_invoice', 'generate_and_send_delayed_invoice_callback');
+
+function generate_and_send_delayed_invoice_callback($draft_invoice_id) {
+    global $wpdb;
+
+    $draft = $wpdb->get_row(
+        $wpdb->prepare("SELECT * FROM {$wpdb->prefix}booking_draft_invoices WHERE id = %d", $draft_invoice_id),
+        ARRAY_A
+    );
+
+    if (!$draft) return;
+
+    // Get booking info (booking_date, customer_name, booking_type, start_date, end_date) from booking_calendar
+    $booking = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT customer_name, booking_type, start_date, end_date FROM {$wpdb->prefix}booking_calendar WHERE id = %d LIMIT 1",
+            $draft['booking_id']
+        ),
+        ARRAY_A
+    );
+
+    if (!$booking) return;
+
+    // Get customer email from booking_customers table
+    $customer_email = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
+            $booking['customer_name']
+        )
+    );
+
+    // Prepare booking dates for email
+    // Optionally, fetch all booking dates for this booking (group by group_id if needed)
+    $booking_dates = $wpdb->get_col(
+        $wpdb->prepare(
+            "SELECT booking_date FROM {$wpdb->prefix}booking_calendar WHERE group_id = (SELECT group_id FROM {$wpdb->prefix}booking_calendar WHERE id = %d) ORDER BY booking_date ASC",
+            $draft['booking_id']
+        )
+    );
+
+    $invoice_counter = get_option('invoice_counter', 1);
+    $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+    update_option('invoice_counter', $invoice_counter + 1);
+
+    // Insert into main invoice table
+    $wpdb->insert(
+        $wpdb->prefix . 'booking_invoices',
+        array(
+            'booking_id' => $draft['booking_id'],
+            'invoice_number' => $invoice_number,
+            'amount' => $draft['amount'],
+            'month_name' => $draft['month_name'],
+            'invoice_sent_at' => current_time('mysql')
+        )
+    );
+
+    $invoice_id = $wpdb->insert_id;
+    $invoice_url = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
+    
+
+    // Send email
+    if ($customer_email) {
+        send_invoice_email(
+            $customer_email,
+            $invoice_number,
+            $draft['amount'],
+            [$invoice_url],
+            $booking['customer_name'],
+            $booking_dates,
+            $draft['month_name']
+        );
+    }
+
+    // Schedule reminders if needed
+    wp_schedule_single_event(
+        time() + 60 * 3,
+        'check_and_send_reminder_email',
+        array(
+            $customer_email,
+            $invoice_number,
+            $invoice_url,
+            $booking['customer_name'],
+            $booking['booking_type'],
+            $booking['start_date'],
+            $booking['end_date'],
+            (string) $draft['amount']
+        )
+    );
+
+    // Clean up draft
+    $wpdb->delete("{$wpdb->prefix}booking_draft_invoices", array('id' => $draft_invoice_id));
+}
+
+
+
 
 
 
@@ -1555,7 +1661,14 @@ add_action('wp_ajax_save_booking', 'save_booking');
 // Include the FPDF library
 require_once( plugin_dir_path( __FILE__ ) . 'fpdf/fpdf.php'); // Correct path to fpdf library
 
-function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates) {
+function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates, $month_name = null) {
+    // If month_name is not provided, fall back to first booking date month
+    if (!$month_name && !empty($dates)) {
+        $month_name = date('F Y', strtotime(reset($dates)));
+    } elseif (!$month_name) {
+        // default month name if dates empty
+        $month_name = date('F Y');
+    }
     $pdf = new FPDF();
     $pdf->AddPage();
     
@@ -1625,7 +1738,7 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
     $pdf->Output('F', $temp_file);
 
     // Email
-    $subject = 'Your Booking Invoice – ' . date('F Y', strtotime(reset($dates)));
+    $subject = 'Your Booking Invoice – ' . $month_name;
     $message = "
     <html>
     <head>
@@ -2627,17 +2740,6 @@ echo '</select>
     <label>Available Time Slots:</label>
     <div id="availableSlots" style="margin-bottom: 2px;"></div>
 </div>
-<div style="display: flex; justify-content: space-between; gap: 10px;">
-                        <div style="flex: 1;">
-                            <label for="start_time">Start Time:</label>
-                            <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;" step="3600" readonly onkeydown="return false;">
-                        </div>
-                        <div style="flex: 1;">
-                            <label for="end_time">End Time:</label>
-                            <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;" step="3600" readonly onkeydown="return false;">
-                        </div>
-                    </div>
-                    <h3>Financial Information</h3><div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
 <div><p id="selectedAmount" style="font-weight: bold;">Per Hourly Cost: Rs. 0</p>
 <p id="monthlyCost" style="font-weight: bold;">Monthly Cost: Rs. 0</p></div>
 <div style="margin-top:10px;">
@@ -2655,12 +2757,23 @@ echo '</select>
 <input type="hidden" name="selected_slot_count" id="selected_slot_count" value="0" />
 <input type="hidden" name="per_day_cost" id="per_day_cost" value="0" />
 <input type="hidden" name="discount_amount_hidden" id="discount_amount_hidden" value="0" />
-</div>
 
 
 
 
+      
 
+                    <div style="display: flex; justify-content: space-between; gap: 10px;">
+                        <div style="flex: 1;">
+                            <label for="start_time">Start Time:</label>
+                            <input type="time" name="start_time" id="start_time" required min="08:00" max="19:00" style="width: 100%;" step="3600" readonly onkeydown="return false;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label for="end_time">End Time:</label>
+                            <input type="time" name="end_time" id="end_time" required min="08:00" max="19:00" style="width: 100%;" step="3600" readonly onkeydown="return false;">
+                        </div>
+                    </div>
+                    
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
                         <input type="submit" value="Save Booking" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">
                         <button type="button" onclick="closeBookingModal()" style="background-color: #21759b; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px;">Close</button>
@@ -3119,33 +3232,24 @@ function calculateMonthlyCost(startDateStr, endDateStr, selectedSlotCount) {
     let breakdownHtml = "";
     let total = 0;
 
-    // Only build the breakdown if discount is NOT enabled
-    const isDiscountEnabled = document.getElementById("enableDiscount")?.checked;
-
-    if (!isDiscountEnabled) {
-        for (const [month, weekCount] of Object.entries(monthBreakdown)) {
-            const cost = weekCount * selectedSlotCount * perSlotCost;
-            total += cost;
-            breakdownHtml += `<div>${month}: Rs. ${cost.toLocaleString()}</div>`;
-        }
-
-        breakdownHtml += `<strong>Total Monthly Cost: Rs. ${total.toLocaleString()}</strong>`;
-        document.getElementById("monthlyCost").innerHTML = breakdownHtml;
-    } else {
-        document.getElementById("monthlyCost").innerHTML = ""; // Hide default cost if discount applied
+    for (const [month, weekCount] of Object.entries(monthBreakdown)) {
+        const cost = weekCount * selectedSlotCount * perSlotCost;
+        total += cost;
+        breakdownHtml += `<div>${month}: Rs. ${cost.toLocaleString()}</div>`;
     }
 
     window.lastMonthlyTotal = total;
     window.lastPerSlotCost = perSlotCost;
 
-    // Always recalculate the discounted value if enabled
-    if (isDiscountEnabled) {
+    breakdownHtml += `<strong>Total Monthly Cost: Rs. ${total.toLocaleString()}</strong>`;
+    document.getElementById("monthlyCost").innerHTML = breakdownHtml;
+
+    if (document.getElementById("enableDiscount")?.checked) {
         applyDiscount();
     } else {
         document.getElementById("discountedCost").innerHTML = '';
     }
 }
-
 
 
 function toggleDiscountInput() {
