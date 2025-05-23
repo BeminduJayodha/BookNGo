@@ -1,6 +1,5 @@
 <?php   
 
-
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -1510,6 +1509,7 @@ foreach ($monthly_bookings as $month => $dates) {
                 'invoice_number' => $invoice_number,
                 'amount' => $discounted_amount,
                 'month_name' => $full_month_label,
+                'group_id' => $group_id,
                 'invoice_sent_at' => current_time('mysql')
             )
         );
@@ -1518,9 +1518,18 @@ foreach ($monthly_bookings as $month => $dates) {
         $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
 
         if ($customer_email) {
-            send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
-            wp_schedule_single_event(time() + 60 * 3, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_urls[0], $customer_name, $booking_type, $start_date, $end_date, (string)$amount));
-        }
+    send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
+
+    // Schedule 3 reminders, each 3 minutes apart
+    for ($i = 1; $i <= 3; $i++) {
+        wp_schedule_single_event(
+            time() + (60 * 1 * $i),
+            'check_and_send_reminder_email',
+            array($customer_email, $invoice_number, $invoice_urls[0], $customer_name, $booking_type, $start_date, $end_date, (string)$amount, $i) // include $i to track which reminder it is
+        );
+    }
+}
+
     } else {
         // Store in draft table
         $wpdb->insert(
@@ -1530,6 +1539,7 @@ foreach ($monthly_bookings as $month => $dates) {
                 'amount' => $discounted_amount,
                 'month_name' => $full_month_label,
                 'schedule_at' => date('Y-m-d H:i:s', time() + $delay_counter),
+                'group_id' => $group_id
 
             )
         );
@@ -1538,7 +1548,7 @@ foreach ($monthly_bookings as $month => $dates) {
         wp_schedule_single_event(time() + $delay_counter, 'generate_and_send_delayed_invoice', array($wpdb->insert_id));
     }
 
-    $delay_counter += 60 * 2;
+    $delay_counter += 60 * 7;
     $month_index++;
 }
 
@@ -1563,6 +1573,7 @@ add_action('generate_and_send_delayed_invoice', 'generate_and_send_delayed_invoi
 function generate_and_send_delayed_invoice_callback($draft_invoice_id) {
     global $wpdb;
 
+    // Get draft invoice details
     $draft = $wpdb->get_row(
         $wpdb->prepare("SELECT * FROM {$wpdb->prefix}booking_draft_invoices WHERE id = %d", $draft_invoice_id),
         ARRAY_A
@@ -1570,86 +1581,170 @@ function generate_and_send_delayed_invoice_callback($draft_invoice_id) {
 
     if (!$draft) return;
 
-    // Get booking info (booking_date, customer_name, booking_type, start_date, end_date) from booking_calendar
+    $booking_id = $draft['booking_id'];
+    $amount = $draft['amount'];
+    $month_name = $draft['month_name'];
+    $group_id = $draft['group_id'];
+
+    // Check if the first invoice for this group has payment_status 'pending'
+    $first_invoice = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$wpdb->prefix}booking_invoices 
+             WHERE group_id = %s ORDER BY id ASC LIMIT 1",
+            $group_id
+        ),
+        ARRAY_A
+    );
+
+    if ($first_invoice && $first_invoice['payment_status'] === 'pending') {
+        // Check how many reminders were sent
+        $reminder_count = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}invoice_reminders 
+                 WHERE invoice_number = %s",
+                $first_invoice['invoice_number']
+            )
+        );
+
+        if ($reminder_count >= 3) {
+            // Final notice check (using wp_options or another method)
+            $final_notice_option_key = 'final_notice_sent_' . $first_invoice['id'];
+            $final_notice_sent = get_option($final_notice_option_key, false);
+
+            if (!$final_notice_sent) {
+                // Get booking details for email
+                $booking = $wpdb->get_row(
+                    $wpdb->prepare(
+                        "SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = %d LIMIT 1",
+                        $booking_id
+                    ),
+                    ARRAY_A
+                );
+
+                $customer_email = $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
+                        $booking['customer_name']
+                    )
+                );
+
+                // Send final warning email
+                send_final_warning_email(
+                    $customer_email,
+                    $first_invoice['invoice_number'],
+                    $booking['customer_name'],
+                    $group_id
+                );
+
+                // Mark final notice as sent
+                update_option($final_notice_option_key, true);
+            }
+
+            // Delete bookings by group_id
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->prefix}booking_calendar WHERE group_id = %s",
+                    $group_id
+                )
+            );
+
+            // Delete related draft invoices
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$wpdb->prefix}booking_draft_invoices WHERE group_id = %s",
+                    $group_id
+                )
+            );
+
+            return; // Stop further processing
+        }
+    }
+
+    // Get booking details
     $booking = $wpdb->get_row(
         $wpdb->prepare(
-            "SELECT customer_name, booking_type, start_date, end_date FROM {$wpdb->prefix}booking_calendar WHERE id = %d LIMIT 1",
-            $draft['booking_id']
+            "SELECT * FROM {$wpdb->prefix}booking_calendar WHERE id = %d LIMIT 1",
+            $booking_id
         ),
         ARRAY_A
     );
 
     if (!$booking) return;
 
-    // Get customer email from booking_customers table
+    $customer_name = $booking['customer_name'];
+    $booking_type = $booking['booking_type'];
+    $start_date = $booking['start_date'];
+    $end_date = $booking['end_date'];
+
+    // Get customer email
     $customer_email = $wpdb->get_var(
         $wpdb->prepare(
             "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
-            $booking['customer_name']
+            $customer_name
         )
     );
 
-    // Prepare booking dates for email
-    // Optionally, fetch all booking dates for this booking (group by group_id if needed)
-    $booking_dates = $wpdb->get_col(
-        $wpdb->prepare(
-            "SELECT booking_date FROM {$wpdb->prefix}booking_calendar WHERE group_id = (SELECT group_id FROM {$wpdb->prefix}booking_calendar WHERE id = %d) ORDER BY booking_date ASC",
-            $draft['booking_id']
-        )
-    );
+    if (!$customer_email) return;
 
+    // Generate invoice number
     $invoice_counter = get_option('invoice_counter', 1);
     $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
     update_option('invoice_counter', $invoice_counter + 1);
 
-    // Insert into main invoice table
+    // Insert new invoice
     $wpdb->insert(
         $wpdb->prefix . 'booking_invoices',
         array(
-            'booking_id' => $draft['booking_id'],
+            'booking_id' => $booking_id,
             'invoice_number' => $invoice_number,
-            'amount' => $draft['amount'],
-            'month_name' => $draft['month_name'],
-            'invoice_sent_at' => current_time('mysql')
+            'amount' => $amount,
+            'month_name' => $month_name,
+            'group_id' => $group_id,
+            'invoice_sent_at' => current_time('mysql'),
+            'payment_status' => 'pending'
         )
+    );
+
+    // Delete the draft invoice
+    $wpdb->delete(
+        $wpdb->prefix . 'booking_draft_invoices',
+        array('id' => $draft_invoice_id)
     );
 
     $invoice_id = $wpdb->insert_id;
     $invoice_url = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
-    
 
-    // Send email
-    if ($customer_email) {
-        send_invoice_email(
-            $customer_email,
-            $invoice_number,
-            $draft['amount'],
-            [$invoice_url],
-            $booking['customer_name'],
-            $booking_dates,
-            $draft['month_name']
-        );
-    }
-
-    // Schedule reminders if needed
-    wp_schedule_single_event(
-        time() + 60 * 3,
-        'check_and_send_reminder_email',
-        array(
-            $customer_email,
-            $invoice_number,
-            $invoice_url,
-            $booking['customer_name'],
-            $booking['booking_type'],
-            $booking['start_date'],
-            $booking['end_date'],
-            (string) $draft['amount']
-        )
+    // Send invoice email
+    send_invoice_email(
+        $customer_email,
+        $invoice_number,
+        $draft['amount'],
+        [$invoice_url],
+        $booking['customer_name'],
+        "$start_date to $end_date",
+        $draft['month_name']
     );
 
-    // Clean up draft
-    $wpdb->delete("{$wpdb->prefix}booking_draft_invoices", array('id' => $draft_invoice_id));
+    // Schedule 3 reminders
+    for ($i = 1; $i <= 3; $i++) {
+        wp_schedule_single_event(
+            time() + 60 * $i,
+            'check_and_send_reminder_email',
+            array(
+                $customer_email,
+                $invoice_number,
+                $invoice_url,
+                $booking['customer_name'],
+                $booking['booking_type'],
+                $start_date,
+                $end_date,
+                (string) $draft['amount'],
+                $i
+            )
+        );
+    }
 }
+
 
 
 
@@ -1939,13 +2034,14 @@ function send_final_warning_and_delete_booking($customer_email, $invoice_number,
 
     wp_mail($customer_email, $final_subject, $final_message, ['Content-Type: text/html; charset=UTF-8']);
 
-    // Delete related bookings
-    $booking_ids = $wpdb->get_col(
-        $wpdb->prepare("SELECT booking_id FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s", $invoice_number)
+    // Get the group_id for the invoice
+    $group_id = $wpdb->get_var(
+        $wpdb->prepare("SELECT group_id FROM {$wpdb->prefix}booking_invoices WHERE invoice_number = %s LIMIT 1", $invoice_number)
     );
 
-    foreach ($booking_ids as $booking_id) {
-        $wpdb->delete("{$wpdb->prefix}booking_calendar", ['id' => $booking_id]);
+    if ($group_id) {
+        // Delete all bookings that belong to this group_id
+        $wpdb->delete("{$wpdb->prefix}booking_calendar", ['group_id' => $group_id]);
     }
 }
 add_action('send_final_warning_and_delete_booking', 'send_final_warning_and_delete_booking', 10, 4);
