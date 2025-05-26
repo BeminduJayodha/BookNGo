@@ -1,6 +1,5 @@
 <?php   
 
-
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -1444,7 +1443,7 @@ function save_booking() {
 
         $current_date->modify('+1 week');
     }
-
+    
     $invoice_counter = get_option('invoice_counter', 1); // Default to 1
 
     // Group booking dates by month
@@ -1593,12 +1592,12 @@ function generate_and_send_delayed_invoice_callback($draft_invoice_id) {
         ARRAY_A
     );
 
-    if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invoice['final_warning_sent'] == 1) {
-        // Delete the booking if unpaid and final warning was sent
-        $wpdb->delete("{$wpdb->prefix}booking_calendar", array('group_id' => $draft['group_id']));
-        $wpdb->delete("{$wpdb->prefix}booking_draft_invoices", array('group_id' => $draft['group_id']));
-        return;
-    }
+  //  if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invoice['final_warning_sent'] == 1) {
+  //      // Delete the booking if unpaid and final warning was sent
+  //      $wpdb->delete("{$wpdb->prefix}booking_calendar", array('group_id' => $draft['group_id']));
+  //      $wpdb->delete("{$wpdb->prefix}booking_draft_invoices", array('group_id' => $draft['group_id']));
+  //      return;
+  //  }
 
     // Get booking details
     $booking = $wpdb->get_row(
@@ -1687,6 +1686,71 @@ function generate_and_send_delayed_invoice_callback($draft_invoice_id) {
 
     // Delete the draft invoice
     $wpdb->delete("{$wpdb->prefix}booking_draft_invoices", array('id' => $draft_invoice_id));
+}
+
+add_action('admin_init', 'delete_unpaid_and_future_months_on_admin_load');
+
+function delete_unpaid_and_future_months_on_admin_load() {
+    if (!current_user_can('manage_options')) return;
+
+    global $wpdb;
+
+    // Fetch all pending invoices with final warning sent
+    $invoices = $wpdb->get_results("
+        SELECT id, booking_id, group_id, month_name 
+        FROM {$wpdb->prefix}booking_invoices 
+        WHERE payment_status = 'Pending' AND final_warning_sent = 1
+    ");
+
+    foreach ($invoices as $invoice) {
+        $group_id        = $invoice->group_id;
+        $unpaid_month_raw = $invoice->month_name;
+
+        // Convert unpaid month string to DateTime object
+        try {
+            $unpaid_month_date = DateTime::createFromFormat('F Y', $unpaid_month_raw);
+        } catch (Exception $e) {
+            continue; // Skip if invalid
+        }
+
+        // Get all months for this group
+        $all_months = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT month_name FROM {$wpdb->prefix}booking_calendar 
+             WHERE group_id = %d",
+            $group_id
+        ));
+
+        foreach ($all_months as $month_raw) {
+            try {
+                $month_date = DateTime::createFromFormat('F Y', $month_raw);
+            } catch (Exception $e) {
+                continue;
+            }
+
+            // If the month is equal or after the unpaid month
+            if ($month_date >= $unpaid_month_date) {
+                // Delete booking_calendar
+                $wpdb->delete("{$wpdb->prefix}booking_calendar", [
+                    'group_id'   => $group_id,
+                    'month_name' => $month_raw
+                ]);
+
+                // Delete matching draft invoices
+                $wpdb->delete("{$wpdb->prefix}booking_draft_invoices", [
+                    'group_id'   => $group_id,
+                    'month_name' => $month_raw
+                ]);
+
+                // Delete only pending invoices
+                $wpdb->query($wpdb->prepare(
+                    "DELETE FROM {$wpdb->prefix}booking_invoices 
+                     WHERE group_id = %d AND month_name = %s AND payment_status = 'Pending'",
+                    $group_id,
+                    $month_raw
+                ));
+            }
+        }
+    }
 }
 
 
