@@ -1,4 +1,10 @@
 <?php   
+/**
+ * Plugin Name: Booking Calendar Plugin
+ * Description: A plugin for admin to book time slots and display them with colors.
+ * Version: 1.0
+ * Author: makerspace
+ */
 
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
@@ -2016,9 +2022,7 @@ wp_schedule_single_event(time() + 60, 'send_final_warning_and_delete_booking', a
     }
 
     // Schedule next reminder if less than 3 have been sent
-    if ($reminder_count + 1 < 3 && !wp_next_scheduled('check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount))) {
-        wp_schedule_single_event(time() + 60 * 1, 'check_and_send_reminder_email', array($customer_email, $invoice_number, $invoice_url, $customer_name, $booking_type, $start_date, $end_date, $amount));
-    }
+
 }
 
 // Hook the function properly
