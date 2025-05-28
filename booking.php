@@ -1,5 +1,6 @@
 <?php   
 
+
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -1592,47 +1593,51 @@ function generate_and_send_delayed_invoice_callback($draft_invoice_id) {
         ARRAY_A
     );
 
-    if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invoice['final_warning_sent'] == 1) {
-    $group_id = $draft['group_id'];
+if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invoice['final_warning_sent'] == 1) {
+    $group_id     = $draft['group_id'];
     $unpaid_month = $last_invoice['month_name']; // e.g., "June 2025"
     
-    // Convert to comparable date string (e.g., "2025-06-01")
-    $unpaid_date = DateTime::createFromFormat('F Y', $unpaid_month);
-    if (!$unpaid_date) return;
+    $unpaid_date_obj = DateTime::createFromFormat('F Y', $unpaid_month);
+    if (!$unpaid_date_obj) {
+        error_log("Invalid unpaid_month: $unpaid_month");
+        return;
+    }
 
-    $formatted_unpaid_date = $unpaid_date->format('Y-m-01');
+    $unpaid_date_str = $unpaid_date_obj->format('Y-m-01');
 
-    // Get all months >= unpaid month for the group
+    // Fetch distinct future month_names for this group_id
     $future_months = $wpdb->get_col(
         $wpdb->prepare(
-            "SELECT DISTINCT month_name FROM {$wpdb->prefix}booking_calendar 
-             WHERE group_id = %d",
+            "SELECT DISTINCT month_name FROM {$wpdb->prefix}booking_calendar WHERE group_id = %d",
             $group_id
         )
     );
 
     foreach ($future_months as $month_name) {
-        $month_date = DateTime::createFromFormat('F Y', $month_name);
-        if ($month_date && $month_date->format('Y-m-01') >= $formatted_unpaid_date) {
-            // Delete from booking_calendar
+        $month_obj = DateTime::createFromFormat('F Y', $month_name);
+        if (!$month_obj) {
+            error_log("Invalid month_name in DB: $month_name");
+            continue;
+        }
+
+        $month_str = $month_obj->format('Y-m-01');
+
+        if ($month_str >= $unpaid_date_str) {
+            error_log("Deleting records for month: $month_name");
+
+            // Delete booking_calendar entries
             $wpdb->delete(
                 "{$wpdb->prefix}booking_calendar",
-                array(
-                    'group_id'   => $group_id,
-                    'month_name' => $month_name
-                )
+                array('group_id' => $group_id, 'month_name' => $month_name)
             );
 
-            // Delete from draft invoices
+            // Delete draft invoices
             $wpdb->delete(
                 "{$wpdb->prefix}booking_draft_invoices",
-                array(
-                    'group_id'   => $group_id,
-                    'month_name' => $month_name
-                )
+                array('group_id' => $group_id, 'month_name' => $month_name)
             );
 
-            // Delete from invoices (only unpaid and final_warning_sent = 1)
+            // Delete unpaid final-warning invoices
             $wpdb->query(
                 $wpdb->prepare(
                     "DELETE FROM {$wpdb->prefix}booking_invoices 
@@ -1646,6 +1651,7 @@ function generate_and_send_delayed_invoice_callback($draft_invoice_id) {
 
     return;
 }
+
 
 
     // Get booking details
