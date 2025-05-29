@@ -1549,7 +1549,7 @@ foreach ($monthly_bookings as $month => $dates) {
         wp_schedule_single_event(time() + $delay_counter, 'generate_and_send_delayed_invoice', array($wpdb->insert_id));
     }
 
-    $delay_counter += 60 * 10;
+    $delay_counter += 60 * 8;
     $month_index++;
 }
 
@@ -1581,76 +1581,123 @@ function generate_and_send_delayed_invoice_callback($draft_invoice_id) {
 
     if (!$draft) return;
 
+    $group_id = $draft['group_id'];
+
     // Step 1: Check latest invoice for same booking_id
     $last_invoice = $wpdb->get_row(
         $wpdb->prepare(
             "SELECT * FROM {$wpdb->prefix}booking_invoices 
-             WHERE group_id = %d 
+             WHERE group_id = %s 
              ORDER BY invoice_sent_at DESC 
              LIMIT 1",
-            $draft['group_id']
+            $group_id
         ),
         ARRAY_A
     );
 
-if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invoice['final_warning_sent'] == 1) {
-    $group_id     = $draft['group_id'];
-    $unpaid_month = $last_invoice['month_name']; // e.g., "June 2025"
-    
-    $unpaid_date_obj = DateTime::createFromFormat('F Y', $unpaid_month);
-    if (!$unpaid_date_obj) {
-        error_log("Invalid unpaid_month: $unpaid_month");
-        return;
+if ($last_invoice && $last_invoice['payment_status'] == 'Pending' && intval($last_invoice['reminder_count']) == 3) {
+    // ✅ Fetch email BEFORE deleting anything
+    $booking = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$wpdb->prefix}booking_calendar WHERE group_id = %s LIMIT 1",
+            $group_id
+        ),
+        ARRAY_A
+    );
+
+    $customer_email = null;
+    if ($booking) {
+        $customer_email = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s LIMIT 1",
+                $booking['customer_name']
+            )
+        );
     }
 
-    $unpaid_date_str = $unpaid_date_obj->format('Y-m-01');
+    if ($customer_email) {
+        wp_mail(
+            $customer_email,
+            "Booking Cancelled - Final Warning",
+            "Your booking for unpaid months has been cancelled after multiple unpaid invoice reminders."
+        );
+    }
 
-    // Fetch distinct future month_names for this group_id
-    $future_months = $wpdb->get_col(
+    // ✅ Now do the deletions
+$unpaid_months = $wpdb->get_col(
+    $wpdb->prepare(
+        "SELECT DISTINCT month_name FROM {$wpdb->prefix}booking_invoices 
+         WHERE group_id = %s AND payment_status = 'Pending' AND reminder_count = 3",
+        $group_id
+    )
+);
+
+if (!empty($unpaid_months)) {
+    // Step 1: Convert month names to DateTime and find earliest unpaid month
+    $dates = array_map(function($month_name) {
+        return DateTime::createFromFormat('F Y', $month_name);
+    }, $unpaid_months);
+
+    usort($dates, function($a, $b) {
+        return $a <=> $b;
+    });
+
+    $earliest_unpaid_date = $dates[0];
+    $earliest_unpaid_month_str = $earliest_unpaid_date->format('F Y');
+
+    // Step 2: Get all calendar bookings in future or same month
+    $all_future_bookings = $wpdb->get_results(
         $wpdb->prepare(
-            "SELECT DISTINCT month_name FROM {$wpdb->prefix}booking_calendar WHERE group_id = %d",
+            "SELECT id, month_name FROM {$wpdb->prefix}booking_calendar 
+             WHERE group_id = %s",
+            $group_id
+        ),
+        ARRAY_A
+    );
+
+    foreach ($all_future_bookings as $booking) {
+        $booking_date = DateTime::createFromFormat('F Y', $booking['month_name']);
+        if ($booking_date >= $earliest_unpaid_date) {
+            // Check if this month is paid
+            $is_paid = $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->prefix}booking_invoices 
+                     WHERE group_id = %s AND month_name = %s AND payment_status = 'Paid'",
+                    $group_id,
+                    $booking['month_name']
+                )
+            );
+
+            if (!$is_paid) {
+                // Delete booking if not paid
+                $wpdb->delete("{$wpdb->prefix}booking_calendar", ['id' => $booking['id']]);
+            }
+        }
+    }
+
+    // Delete only those unpaid invoices with reminder_count = 3
+    $wpdb->query(
+        $wpdb->prepare(
+            "DELETE FROM {$wpdb->prefix}booking_invoices 
+             WHERE group_id = %s AND payment_status = 'Pending' AND reminder_count = 3",
             $group_id
         )
     );
+}
 
-    foreach ($future_months as $month_name) {
-        $month_obj = DateTime::createFromFormat('F Y', $month_name);
-        if (!$month_obj) {
-            error_log("Invalid month_name in DB: $month_name");
-            continue;
-        }
+// Always delete draft invoices for this group
+$wpdb->query(
+    $wpdb->prepare(
+        "DELETE FROM {$wpdb->prefix}booking_draft_invoices 
+         WHERE group_id = %s",
+        $group_id
+    )
+);
 
-        $month_str = $month_obj->format('Y-m-01');
-
-        if ($month_str >= $unpaid_date_str) {
-            error_log("Deleting records for month: $month_name");
-
-            // Delete booking_calendar entries
-            $wpdb->delete(
-                "{$wpdb->prefix}booking_calendar",
-                array('group_id' => $group_id, 'month_name' => $month_name)
-            );
-
-            // Delete draft invoices
-            $wpdb->delete(
-                "{$wpdb->prefix}booking_draft_invoices",
-                array('group_id' => $group_id, 'month_name' => $month_name)
-            );
-
-            // Delete unpaid final-warning invoices
-            $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->prefix}booking_invoices 
-                     WHERE group_id = %d AND month_name = %s AND payment_status = 'Pending' AND final_warning_sent = 1",
-                    $group_id,
-                    $month_name
-                )
-            );
-        }
-    }
 
     return;
 }
+
 
 
 
@@ -1677,9 +1724,9 @@ if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invo
     $booking_dates = $wpdb->get_col(
         $wpdb->prepare(
             "SELECT booking_date FROM {$wpdb->prefix}booking_calendar 
-             WHERE group_id = (SELECT group_id FROM {$wpdb->prefix}booking_calendar WHERE id = %d) 
+             WHERE group_id = %s 
              ORDER BY booking_date ASC",
-            $draft['booking_id']
+            $group_id
         )
     );
 
@@ -1696,11 +1743,11 @@ if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invo
             'invoice_number'    => $invoice_number,
             'amount'            => $draft['amount'],
             'month_name'        => $draft['month_name'],
-            'group_id'          => $draft['group_id'],
+            'group_id'          => $group_id,
             'invoice_sent_at'   => current_time('mysql'),
             'payment_status'    => 'Pending',
             'reminder_count'    => 0,
-            'final_warning_sent' => 0 // Default: not sent
+            'final_warning_sent' => 0
         )
     );
 
@@ -1723,7 +1770,7 @@ if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invo
     // Schedule 3 reminders
     for ($i = 1; $i <= 3; $i++) {
         wp_schedule_single_event(
-            time() + 60 * 2 * $i,
+            time() + 60 * $i, // 1, 2, 3 minutes later
             'check_and_send_reminder_email',
             array(
                 $customer_email,
@@ -1742,6 +1789,8 @@ if ($last_invoice && $last_invoice['payment_status'] === 'Pending' && $last_invo
     // Delete the draft invoice
     $wpdb->delete("{$wpdb->prefix}booking_draft_invoices", array('id' => $draft_invoice_id));
 }
+
+
 
 //add_action('admin_init', 'delete_unpaid_and_future_months_on_admin_load');
 //
@@ -2063,10 +2112,10 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
             array('customer_email' => $customer_email)
         );
     // Schedule final warning email and deletion after 3 minutes
-wp_schedule_single_event(time() + 60 *2, 'send_final_warning_and_delete_booking', array(
-    $customer_email, $invoice_number, $invoice_url, $customer_name
-));
-
+//wp_schedule_single_event(time() + 60 *2, 'send_final_warning_and_delete_booking', array(
+//    $customer_email, $invoice_number, $invoice_url, $customer_name
+//));
+//
         return;
     }
 
