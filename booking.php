@@ -1,6 +1,5 @@
 <?php   
 
-
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -1057,18 +1056,15 @@ foreach ($invoice_numbers as $invoice_number) {
 
 
 
-
-function handle_payment_slip_upload() {  
+add_action('init', 'handle_payment_slip_upload');
+function handle_payment_slip_upload() {
     global $wpdb;
 
-    // Check if the form is submitted
     if (isset($_POST['upload_slip']) && isset($_FILES['payment_slip'])) {
-        $invoice_id = intval($_POST['invoice_id']); // Get invoice ID
-        $file = $_FILES['payment_slip']; // Get uploaded file
+        $invoice_id = intval($_POST['invoice_id']);
+        $file = $_FILES['payment_slip'];
 
-        // Check if a file was uploaded
         if (!empty($file['name'])) {
-            // Handle file upload
             require_once(ABSPATH . 'wp-admin/includes/file.php');
             require_once(ABSPATH . 'wp-admin/includes/media.php');
             require_once(ABSPATH . 'wp-admin/includes/image.php');
@@ -1079,7 +1075,6 @@ function handle_payment_slip_upload() {
             if ($movefile && !isset($movefile['error'])) {
                 $file_url = str_replace(wp_upload_dir()['baseurl'] . '/', '', $movefile['url']);
 
-                // Retrieve the invoice_number associated with the uploaded invoice
                 $invoice_number = $wpdb->get_var(
                     $wpdb->prepare(
                         "SELECT invoice_number FROM {$wpdb->prefix}booking_invoices WHERE id = %d",
@@ -1087,19 +1082,17 @@ function handle_payment_slip_upload() {
                     )
                 );
 
-                // If an invoice_number is found, update all related invoices' payment_status to 'Paid'
                 if ($invoice_number) {
                     $wpdb->update(
                         "{$wpdb->prefix}booking_invoices",
                         array(
                             'payment_slip' => $file_url,
-                            'payment_status' => 'Paid'  // Update payment status to Paid
+                            'payment_status' => 'Paid'
                         ),
                         array('invoice_number' => $invoice_number)
                     );
                 }
 
-                // Retrieve customer email from the invoice
                 $customer_email = $wpdb->get_var(
                     $wpdb->prepare(
                         "SELECT customer_email FROM {$wpdb->prefix}booking_customers 
@@ -1109,16 +1102,27 @@ function handle_payment_slip_upload() {
                     )
                 );
 
-                // If customer exists, reset restriction
                 if ($customer_email) {
+                    // Reset restriction
                     $wpdb->update(
                         "{$wpdb->prefix}booking_customers",
-                        array('is_restricted' => 0), // Reset restriction
+                        array('is_restricted' => 0),
                         array('customer_email' => $customer_email)
                     );
+
+                    // Send payment confirmation email
+                    $subject = 'Payment Received for Your Booking – Invoice ' . $invoice_number;
+                    $message = 'Dear Customer,' . "\r\n\r\n" .
+                               'We have received your payment and your invoice has been marked as Paid.' . "\r\n" .
+                               'Thank you for your payment.' . "\r\n\r\n" .
+                               'Best regards,' . "\r\n" .
+                               get_bloginfo('Makerspace Team');
+
+                    $headers = array('Content-Type: text/plain; charset=UTF-8');
+
+                    wp_mail($customer_email, $subject, $message, $headers);
                 }
 
-                // Redirect to the same page to show the updated status
                 wp_redirect($_SERVER['REQUEST_URI']);
                 exit;
             } else {
@@ -1127,6 +1131,7 @@ function handle_payment_slip_upload() {
         }
     }
 }
+
 
 
 
