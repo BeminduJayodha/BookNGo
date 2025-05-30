@@ -1616,11 +1616,60 @@ if ($last_invoice && $last_invoice['payment_status'] == 'Pending' && intval($las
     }
 
     if ($customer_email) {
-        wp_mail(
-            $customer_email,
-            "Booking Cancelled - Final Warning",
-            "Your booking for unpaid months has been cancelled after multiple unpaid invoice reminders."
-        );
+        // Get all unpaid invoice numbers and months
+// Get all unpaid invoice numbers and months
+$unpaid_invoices = $wpdb->get_results(
+    $wpdb->prepare(
+        "SELECT invoice_number, month_name FROM {$wpdb->prefix}booking_invoices 
+         WHERE group_id = %s AND payment_status = 'Pending' AND reminder_count = 3",
+        $group_id
+    ),
+    ARRAY_A
+);
+
+$invoice_lines = array_map(function($inv) {
+    return "<li><strong>{$inv['invoice_number']}</strong> — {$inv['month_name']}</li>";
+}, $unpaid_invoices);
+
+$invoice_details = "<ul>" . implode('', $invoice_lines) . "</ul>";
+
+// Get customer name
+$customer_name = $booking['customer_name'] ?? 'Customer';
+
+// Build HTML message
+$message = "
+<html>
+<body>
+<p>Dear <strong>$customer_name</strong>,</p>
+
+<p>Your booking has been removed due to multiple unpaid invoice reminders.</p>
+<p>Unfortunately, we haven’t received your payment yet. We're sorry to inform you that we will now proceed to <strong>remove your booking</strong> from our system.</p>
+
+<p>The following invoices were not paid and are now removed:</p>
+$invoice_details
+
+<p>If this is a mistake or you need assistance, please contact us immediately.</p>
+
+<p>Best regards,<br>Makerspace Team</p>
+</body>
+</html>
+";
+
+// Set content type to HTML
+add_filter('wp_mail_content_type', function() {
+    return "text/html";
+});
+
+wp_mail(
+    $customer_email,
+    "Final Notice: Booking Removal Due to Unpaid Invoice",
+    $message
+);
+
+// Reset content type after sending
+remove_filter('wp_mail_content_type', 'set_html_content_type');
+
+
     }
 
     // ✅ Now do the deletions
