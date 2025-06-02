@@ -1075,52 +1075,61 @@ function handle_payment_slip_upload() {
             if ($movefile && !isset($movefile['error'])) {
                 $file_url = str_replace(wp_upload_dir()['baseurl'] . '/', '', $movefile['url']);
 
-                $invoice_number = $wpdb->get_var(
+                // Get invoice details
+                $invoice = $wpdb->get_row(
                     $wpdb->prepare(
-                        "SELECT invoice_number FROM {$wpdb->prefix}booking_invoices WHERE id = %d",
+                        "SELECT invoice_number, booking_id FROM {$wpdb->prefix}booking_invoices WHERE id = %d",
                         $invoice_id
                     )
                 );
 
-                if ($invoice_number) {
+                if ($invoice) {
+                    // Update payment slip and status
                     $wpdb->update(
                         "{$wpdb->prefix}booking_invoices",
                         array(
                             'payment_slip' => $file_url,
                             'payment_status' => 'Paid'
                         ),
-                        array('invoice_number' => $invoice_number)
-                    );
-                }
-
-                $customer_email = $wpdb->get_var(
-                    $wpdb->prepare(
-                        "SELECT customer_email FROM {$wpdb->prefix}booking_customers 
-                         WHERE customer_email = (SELECT customer_email FROM {$wpdb->prefix}booking_invoices WHERE id = %d LIMIT 1) 
-                         LIMIT 1",
-                        $invoice_id
-                    )
-                );
-
-                if ($customer_email) {
-                    // Reset restriction
-                    $wpdb->update(
-                        "{$wpdb->prefix}booking_customers",
-                        array('is_restricted' => 0),
-                        array('customer_email' => $customer_email)
+                        array('id' => $invoice_id)
                     );
 
-                    // Send payment confirmation email
-                    $subject = 'Payment Received for Your Booking – Invoice ' . $invoice_number;
-                    $message = 'Dear Customer,' . "\r\n\r\n" .
-                               'We have received your payment and your invoice has been marked as Paid.' . "\r\n" .
-                               'Thank you for your payment.' . "\r\n\r\n" .
-                               'Best regards,' . "\r\n" .
-                               get_bloginfo('Makerspace Team');
+                    // Get customer_name from wp_booking_calendar using booking_id
+                    $customer_name = $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT customer_name FROM {$wpdb->prefix}booking_calendar WHERE id = %d",
+                            $invoice->booking_id
+                        )
+                    );
 
-                    $headers = array('Content-Type: text/plain; charset=UTF-8');
+                    // Get customer_email using customer_name
+                    $customer_email = $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT customer_email FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s",
+                            $customer_name
+                        )
+                    );
 
-                    wp_mail($customer_email, $subject, $message, $headers);
+                    if ($customer_email) {
+                        // Reset restriction
+                        $wpdb->update(
+                            "{$wpdb->prefix}booking_customers",
+                            array('is_restricted' => 0),
+                            array('customer_email' => $customer_email)
+                        );
+
+                        // Send email
+                        $subject = 'Payment Received – Invoice ' . $invoice->invoice_number;
+                        $message = "Dear $customer_name,\r\n\r\n" .
+                                   "We have received your payment and your invoice has been marked as Paid.\r\n" .
+                                   "Thank you for your prompt payment.\r\n\r\n" .
+                                   "Best regards,\r\n" .
+                                   get_bloginfo('name') . " Makerspace Team";
+
+                        $headers = array('Content-Type: text/plain; charset=UTF-8');
+
+                        wp_mail($customer_email, $subject, $message, $headers);
+                    }
                 }
 
                 wp_redirect($_SERVER['REQUEST_URI']);
@@ -1824,7 +1833,7 @@ $wpdb->query(
     // Schedule 3 reminders
     for ($i = 1; $i <= 3; $i++) {
         wp_schedule_single_event(
-            time() + 60 * $i, // 1, 2, 3 minutes later
+            current_time('timestamp') + 60 * 2 * $i, // 1, 2, 3 minutes later
             'check_and_send_reminder_email',
             array(
                 $customer_email,
