@@ -4,6 +4,28 @@
 if (!defined('ABSPATH')) {
     exit;
 }
+function booking_calendar_send_custom_email($to, $subject, $message, $headers = '', $attachments = array()) {
+    // Add filters to override default "From" name and email
+    add_filter('wp_mail_from_name', 'booking_calendar_custom_mail_from_name');
+    add_filter('wp_mail_from', 'booking_calendar_custom_mail_from');
+
+    // Send the email
+    wp_mail($to, $subject, $message, $headers, $attachments);
+
+    // Remove the filters afterward to avoid affecting other emails
+    remove_filter('wp_mail_from_name', 'booking_calendar_custom_mail_from_name');
+    remove_filter('wp_mail_from', 'booking_calendar_custom_mail_from');
+}
+
+// Custom sender name
+function booking_calendar_custom_mail_from_name($name) {
+    return 'Makerspace'; // You can change this
+}
+
+// Custom sender email
+function booking_calendar_custom_mail_from($email) {
+    return 'bookings@designhouse.lk'; // Make sure this email is authenticated on your domain
+}
 
 // Activation hook to create database table
 function booking_calendar_install() {
@@ -484,7 +506,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         'Content-Type: text/html; charset=UTF-8'
     ];
 
-    wp_mail($customer_email, $subject, nl2br($message), $headers);
+    booking_calendar_send_custom_email($customer_email, $subject, nl2br($message), $headers);
 
     exit;
 }
@@ -916,7 +938,7 @@ function display_payment_page() {
         
     }
     </style>';
-$selected_status = isset($_POST['filter_status']) ? $_POST['filter_status'] : 'all';
+$selected_status = isset($_POST['filter_status']) ? $_POST['filter_status'] : 'Pending';
 
 $selected_customer = isset($_POST['filter_customer']) ? $_POST['filter_customer'] : 'all';
 $customer_names = $wpdb->get_col("SELECT DISTINCT customer_name FROM {$wpdb->prefix}booking_calendar ORDER BY customer_name");
@@ -924,7 +946,7 @@ $customer_names = $wpdb->get_col("SELECT DISTINCT customer_name FROM {$wpdb->pre
 echo '<div style="margin-bottom: 20px; display: flex; align-items: center; gap: 30px;">';
 
 echo '<div>
-    <label for="filter_status"><strong>Filter by Payment Status:</strong></label>
+    <label for="filter_status"><strong>Payment Status:</strong></label>
     <select name="filter_status" id="filter_status" onchange="this.form.submit()" style="margin-left: 10px;">
         <option value="all"' . selected($selected_status, 'all', false) . '>All</option>
         <option value="Paid"' . selected($selected_status, 'Paid', false) . '>Paid</option>
@@ -932,25 +954,62 @@ echo '<div>
     </select>
 </div>';
 
-echo '<div>
-    <label for="filter_customer"><strong>Customer Name:</strong></label>
+echo '<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;"> 
+    <label for="filter_customer"><strong>Instructor Name:</strong></label>
     <select name="filter_customer" id="filter_customer" onchange="this.form.submit()" style="margin-left: 10px;">
         <option value="all"' . selected($selected_customer, 'all', false) . '>All</option>';
 foreach ($customer_names as $customer_name) {
     echo '<option value="' . esc_attr($customer_name) . '"' . selected($selected_customer, $customer_name, false) . '>' . esc_html($customer_name) . '</option>';
 }
 echo '</select>
+
+    <label for="dateRangeToggle" style="margin-left: 20px; cursor: pointer;">
+        <strong>Date Range:</strong>
+    </label>
+    <button type="button" id="dateRangeToggle" style="cursor:pointer;" title="Filter by date range">
+        <span class="dashicons dashicons-calendar-alt"></span>
+    </button>
 </div>';
 
+// Date range inputs hidden initially
+$from_date = isset($_POST['from_date']) && $_POST['from_date'] !== '' ? $_POST['from_date'] : '';
+$to_date = isset($_POST['to_date']) && $_POST['to_date'] !== '' ? $_POST['to_date'] : '';
+
+echo '<div id="dateRangeFilters" style="display:none; margin-bottom: 20px;">
+    <label for="from_date"><strong>From:</strong></label>
+    <input type="date" name="from_date" id="from_date" value="' . esc_attr($from_date) . '" style="margin-right:20px;">
+    <label for="to_date"><strong>To:</strong></label>
+    <input type="date" name="to_date" id="to_date" value="' . esc_attr($to_date) . '">
+    <button type="submit" style="margin-left: 20px;">Filter</button>
+</div>';
+
+// Add JS to toggle date range filters
+echo '
+<script>
+    document.getElementById("dateRangeToggle").addEventListener("click", function() {
+        var filters = document.getElementById("dateRangeFilters");
+        if (filters.style.display === "none" || filters.style.display === "") {
+            filters.style.display = "block";
+        } else {
+            filters.style.display = "none";
+        }
+    });
+</script>
+';
+
+
 echo '</div>';
+
 
 
     echo '<table class="wp-list-table widefat fixed striped invoices-table" cellspacing="0" cellpadding="5" style="width:100%; border: 1px solid #ddd; margin-bottom: 20px;">
         <thead>
             <tr>
+                <th><input type="checkbox" id="select-all"></th>
                 <th>Invoice Number</th>
-                <th>Customer Name</th>
-                <th>Booking Date(s)</th>
+                <th>Invoice Date</th>
+                <th>Instructor Name</th>
+                <th>Description</th>
                 <th>Amount</th>
                 <th>Payment Status</th>
                 <th>Payment Slip</th>
@@ -983,12 +1042,20 @@ foreach ($invoice_numbers as $invoice_number) {
         if ($selected_customer !== 'all' && (!isset($booking->customer_name) || $booking->customer_name !== $selected_customer)) {
             continue;
         }
+if (!empty($from_date) && strtotime($booking->start_date) < strtotime($from_date)) {
+    continue;
+}
+
+if (!empty($to_date) && strtotime($booking->start_date) > strtotime($to_date)) {
+    continue;
+}
 
         if ($booking) {
-            echo '<tr>';
+            echo '<td><input type="checkbox" class="invoice-checkbox" name="selected_invoices[]" value="' . esc_attr($invoice->invoice_number) . '"></td>';
             echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
+            echo '<td>' . esc_html(date('Y-m-d', strtotime($invoice->date_created))) . '</td>';
             echo '<td>' . esc_html($booking->customer_name) . '</td>';
-            echo '<td>' . esc_html($booking->start_date) . ' to ' . esc_html($booking->booking_date) . '</td>';
+            echo '<td>' . esc_html($booking->description) . '</td>';
             echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
 
             $status_class = ($payment_status === 'Paid') ? 'status-paid' : 'status-pending';
@@ -1051,6 +1118,24 @@ foreach ($invoice_numbers as $invoice_number) {
                 }
             };
         });
+        document.addEventListener("DOMContentLoaded", function () {
+    const selectAllCheckbox = document.getElementById("select-all");
+    const invoiceCheckboxes = document.querySelectorAll(".invoice-checkbox");
+
+    selectAllCheckbox.addEventListener("change", function () {
+        invoiceCheckboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+    });
+
+    invoiceCheckboxes.forEach(cb => {
+        cb.addEventListener("change", function () {
+            if (!this.checked) {
+                selectAllCheckbox.checked = false;
+            } else if ([...invoiceCheckboxes].every(i => i.checked)) {
+                selectAllCheckbox.checked = true;
+            }
+        });
+    });
+});
     </script>';
 }
 
@@ -1128,7 +1213,7 @@ function handle_payment_slip_upload() {
 
                         $headers = array('Content-Type: text/plain; charset=UTF-8');
 
-                        wp_mail($customer_email, $subject, $message, $headers);
+                        booking_calendar_send_custom_email($customer_email, $subject, $message, $headers);
                     }
                 }
 
@@ -2036,7 +2121,7 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
     </html>";
 
     $headers = array('Content-Type: text/html; charset=UTF-8');
-    wp_mail($customer_email, $subject, $message, $headers, array($temp_file));
+    booking_calendar_send_custom_email($customer_email, $subject, $message, $headers, array($temp_file));
 
     unlink($temp_file);
 }
@@ -2150,7 +2235,7 @@ function check_and_send_reminder_email($customer_email, $invoice_number, $invoic
 
     $headers = array('Content-Type: text/html; charset=UTF-8');
     $attachments = array($temp_file);
-    $sent = wp_mail($customer_email, $subject, $message, $headers, $attachments);
+    $sent = booking_calendar_send_custom_email($customer_email, $subject, $message, $headers, $attachments);
 
     // Delete the file after sending
     unlink($temp_file);
@@ -2217,7 +2302,7 @@ function send_final_warning_and_delete_booking($customer_email, $invoice_number,
     </html>
     ";
 
-    $sent = wp_mail($customer_email, $final_subject, $final_message, ['Content-Type: text/html; charset=UTF-8']);
+    $sent = booking_calendar_send_custom_email($customer_email, $final_subject, $final_message, ['Content-Type: text/html; charset=UTF-8']);
 
     if ($sent) {
         // Mark final warning as sent
@@ -2294,7 +2379,7 @@ function send_reminder_email($customer_email, $invoice_number, $invoice_url) {
     </html>";
 
     $headers = array('Content-Type: text/html; charset=UTF-8');
-    wp_mail($customer_email, $subject, $message, $headers);
+    booking_calendar_send_custom_email($customer_email, $subject, $message, $headers);
 }
 
 // Hook to ensure the scheduled event runs
@@ -2363,7 +2448,7 @@ function send_subsequent_invoice_email($customer_email, $invoice_number, $amount
     </html>";
 
     $headers = array('Content-Type: text/html; charset=UTF-8');
-    wp_mail($customer_email, $subject, $message, $headers);
+    booking_calendar_send_custom_email($customer_email, $subject, $message, $headers);
 }
 
 // Hook to send subsequent invoice emails
