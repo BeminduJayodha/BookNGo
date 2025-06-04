@@ -912,6 +912,17 @@ function display_payment_page() {
         text-align: center;
         vertical-align: middle;
     }
+        .invoices-table tbody tr:nth-child(odd) {
+        background-color: #ffffff;
+    }
+
+    .invoices-table tbody tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+    .invoices-table tbody tr:hover {
+    background-color: #e0f7fa;
+}
+
     .invoices-table thead th:last-child,
     .invoices-table tbody td:last-child {
         border-right: none;
@@ -937,13 +948,27 @@ function display_payment_page() {
         background-color: #FF9800; /* Orange */
         
     }
+    .invoices-table th,
+.invoices-table td {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+}
+    .invoices-table th,
+    .invoices-table td {
+        vertical-align: middle !important;
+    }
+
+    .invoices-table input[type="checkbox"] {
+        margin: 0 auto;
+        display: block;
+    }
     </style>';
 $selected_status = isset($_POST['filter_status']) ? $_POST['filter_status'] : 'Pending';
-
 $selected_customer = isset($_POST['filter_customer']) ? $_POST['filter_customer'] : 'all';
 $customer_names = $wpdb->get_col("SELECT DISTINCT customer_name FROM {$wpdb->prefix}booking_calendar ORDER BY customer_name");
 
-echo '<div style="margin-bottom: 20px; display: flex; align-items: center; gap: 30px;">';
+// First Row: Payment Status & Instructor Name
+echo '<div style="margin-bottom: 10px; display: flex; align-items: center; gap: 30px;">';
 
 echo '<div>
     <label for="filter_status"><strong>Payment Status:</strong></label>
@@ -954,7 +979,7 @@ echo '<div>
     </select>
 </div>';
 
-echo '<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;"> 
+echo '<div>
     <label for="filter_customer"><strong>Instructor Name:</strong></label>
     <select name="filter_customer" id="filter_customer" onchange="this.form.submit()" style="margin-left: 10px;">
         <option value="all"' . selected($selected_customer, 'all', false) . '>All</option>';
@@ -962,16 +987,19 @@ foreach ($customer_names as $customer_name) {
     echo '<option value="' . esc_attr($customer_name) . '"' . selected($selected_customer, $customer_name, false) . '>' . esc_html($customer_name) . '</option>';
 }
 echo '</select>
+</div>';
 
-    <label for="dateRangeToggle" style="margin-left: 20px; cursor: pointer;">
-        <strong>Date Range:</strong>
-    </label>
-    <button type="button" id="dateRangeToggle" style="cursor:pointer;" title="Filter by date range">
+echo '</div>'; // End of first row
+
+// Second Row: Date Range Toggle
+echo '<div style="margin-bottom: 10px;">
+    <label for="dateRangeToggle" style="margin-right: 10px; cursor: pointer;"><strong>Date Range:</strong></label>
+    <button type="button" id="dateRangeToggle" style="cursor:pointer; background:none; border:none; padding:0; margin:0; outline:none;" title="Filter by date range">
         <span class="dashicons dashicons-calendar-alt"></span>
     </button>
 </div>';
 
-// Date range inputs hidden initially
+// Date Range Inputs (initially hidden)
 $from_date = isset($_POST['from_date']) && $_POST['from_date'] !== '' ? $_POST['from_date'] : '';
 $to_date = isset($_POST['to_date']) && $_POST['to_date'] !== '' ? $_POST['to_date'] : '';
 
@@ -980,32 +1008,39 @@ echo '<div id="dateRangeFilters" style="display:none; margin-bottom: 20px;">
     <input type="date" name="from_date" id="from_date" value="' . esc_attr($from_date) . '" style="margin-right:20px;">
     <label for="to_date"><strong>To:</strong></label>
     <input type="date" name="to_date" id="to_date" value="' . esc_attr($to_date) . '">
-    <button type="submit" style="margin-left: 20px;">Filter</button>
+    <button type="submit" style="margin-left: 20px; background-color: #2271b1; color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer;">Filter</button>
 </div>';
 
-// Add JS to toggle date range filters
+// JavaScript to toggle date range
 echo '
 <script>
-    document.getElementById("dateRangeToggle").addEventListener("click", function() {
-        var filters = document.getElementById("dateRangeFilters");
-        if (filters.style.display === "none" || filters.style.display === "") {
-            filters.style.display = "block";
-        } else {
-            filters.style.display = "none";
+    document.addEventListener("DOMContentLoaded", function() {
+        const toDateInput = document.getElementById("to_date");
+        if (!toDateInput.value) {
+            const today = new Date().toISOString().split("T")[0];
+            toDateInput.value = today;
         }
     });
-</script>
-';
+
+    document.getElementById("dateRangeToggle").addEventListener("click", function() {
+        var filters = document.getElementById("dateRangeFilters");
+        filters.style.display = (filters.style.display === "none" || filters.style.display === "") ? "block" : "none";
+    });
+</script>';
 
 
-echo '</div>';
 
+echo '<div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+    <button type="button" id="downloadCsvBtn" style="background-color: #2271b1; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px;">
+        Download Selected Orders
+    </button>
+</div>';
 
 
     echo '<table class="wp-list-table widefat fixed striped invoices-table" cellspacing="0" cellpadding="5" style="width:100%; border: 1px solid #ddd; margin-bottom: 20px;">
         <thead>
             <tr>
-                <th><input type="checkbox" id="select-all"></th>
+                <th><input type="checkbox" id="select-all">Select All</th>
                 <th>Invoice Number</th>
                 <th>Invoice Date</th>
                 <th>Instructor Name</th>
@@ -1051,6 +1086,7 @@ if (!empty($to_date) && strtotime($booking->start_date) > strtotime($to_date)) {
 }
 
         if ($booking) {
+        echo '<tr>';
             echo '<td><input type="checkbox" class="invoice-checkbox" name="selected_invoices[]" value="' . esc_attr($invoice->invoice_number) . '"></td>';
             echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
             echo '<td>' . esc_html(date('Y-m-d', strtotime($invoice->date_created))) . '</td>';
@@ -1058,16 +1094,36 @@ if (!empty($to_date) && strtotime($booking->start_date) > strtotime($to_date)) {
             echo '<td>' . esc_html($booking->description) . '</td>';
             echo '<td>Rs. ' . esc_html(number_format($invoice->amount, 2)) . '</td>';
 
-            $status_class = ($payment_status === 'Paid') ? 'status-paid' : 'status-pending';
-            echo '<td><span class="status-badge ' . $status_class . '">' . $payment_status . '</span></td>';
+$is_pending = ($payment_status === 'Pending');
+$status_class = $is_pending ? 'status-pending' : 'status-paid';
+$status_color = $is_pending ? '#FF9800' : '#4CAF50';
 
-            if (!empty($invoice->payment_slip)) {
-                echo '<td><a href="' . esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) . '" target="_blank"><span class="dashicons dashicons-visibility"></span> View Slip</a></td>';
-            } else {
-                echo '<td><button type="button" class="button upload-slip" data-id="' . esc_attr($invoice->id) . '">
-                    <span class="dashicons dashicons-upload"></span> Upload Slip
-                </button></td>';
-            }
+echo '<td>
+    <button 
+        type="button" 
+        class="status-badge ' . $status_class . ($is_pending ? ' open-upload-modal' : '') . '" 
+        data-id="' . esc_attr($invoice->id) . '" 
+        style="border: none; background-color: ' . $status_color . '; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer;"
+    >
+        ' . $payment_status . '
+    </button>
+</td>';
+
+$slip_url = !empty($invoice->payment_slip) ? esc_url(wp_upload_dir()['baseurl'] . '/' . $invoice->payment_slip) : '#';
+$is_uploaded = !empty($invoice->payment_slip);
+
+echo '<td>';
+if ($is_uploaded) {
+    echo '<a href="' . $slip_url . '" target="_blank" style="color: #0073aa; text-decoration: none;">
+        <span class="dashicons dashicons-visibility"></span> View Slip
+    </a>';
+} else {
+    echo '<span class="dashicons dashicons-visibility" style="color: #ccc; opacity: 0.5; cursor: not-allowed;" title="No slip uploaded"></span> View Slip';
+}
+echo '</td>';
+
+
+
 
             echo '</tr>';
         }
@@ -1096,28 +1152,30 @@ if (!empty($to_date) && strtotime($booking->start_date) > strtotime($to_date)) {
     handle_payment_slip_upload($invoices);
 
     echo '<script>
-        document.addEventListener("DOMContentLoaded", function () {
-            var modal = document.getElementById("uploadModal");
-            var closeModal = document.querySelector(".close-modal");
-            var uploadButtons = document.querySelectorAll(".upload-slip");
+document.addEventListener("DOMContentLoaded", function() {
+    const modal = document.getElementById("uploadModal");
+    const closeModal = document.querySelector(".close-modal");
+    const invoiceIdInput = document.getElementById("invoice_id");
 
-            uploadButtons.forEach(button => {
-                button.addEventListener("click", function () {
-                    document.getElementById("invoice_id").value = this.dataset.id;
-                    modal.style.display = "block";
-                });
-            });
-
-            closeModal.addEventListener("click", function () {
-                modal.style.display = "none";
-            });
-
-            window.onclick = function(event) {
-                if (event.target == modal) {
-                    modal.style.display = "none";
-                }
-            };
+    // Only for pending buttons
+    document.querySelectorAll(".open-upload-modal").forEach(button => {
+        button.addEventListener("click", function() {
+            const invoiceId = this.getAttribute("data-id");
+            invoiceIdInput.value = invoiceId;
+            modal.style.display = "block";
         });
+    });
+
+    closeModal.addEventListener("click", function() {
+        modal.style.display = "none";
+    });
+
+    window.addEventListener("click", function(e) {
+        if (e.target === modal) {
+            modal.style.display = "none";
+        }
+    });
+});
         document.addEventListener("DOMContentLoaded", function () {
     const selectAllCheckbox = document.getElementById("select-all");
     const invoiceCheckboxes = document.querySelectorAll(".invoice-checkbox");
@@ -1136,7 +1194,54 @@ if (!empty($to_date) && strtotime($booking->start_date) > strtotime($to_date)) {
         });
     });
 });
+
     </script>';
+echo '<script>
+document.addEventListener("DOMContentLoaded", function () {
+    document.getElementById("downloadCsvBtn").addEventListener("click", function () {
+        const selectedCheckboxes = document.querySelectorAll(".invoice-checkbox:checked");
+
+        if (selectedCheckboxes.length === 0) {
+            alert("Please select at least one invoice to download.");
+            return;
+        }
+
+        const rows = [
+            ["Invoice Number", "Invoice Date", "Instructor Name", "Description", "Amount", "Payment Status"]
+        ];
+
+        selectedCheckboxes.forEach(function(cb) {
+            const row = cb.closest("tr");
+            const cells = row.querySelectorAll("td");
+
+            const invoiceNumber = cells[1] ? cells[1].innerText.trim() : "";
+            const invoiceDate = cells[2] ? cells[2].innerText.trim() : "";
+            const instructor = cells[3] ? cells[3].innerText.trim() : "";
+            const description = cells[4] ? cells[4].innerText.trim() : "";
+            const amount = cells[5] ? cells[5].innerText.trim() : "";
+            const status = cells[6] ? cells[6].innerText.trim() : "";
+
+            rows.push([invoiceNumber, invoiceDate, instructor, description, amount, status]);
+        });
+
+        const csvContent = rows.map(function(e) {
+            return e.map(function(cell) {
+                return "\"" + cell.replace(/"/g, "\"\"") + "\"";
+            }).join(",");
+        }).join("\n");
+
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "selected_invoices.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+});
+</script>';
+
+
 }
 
 
