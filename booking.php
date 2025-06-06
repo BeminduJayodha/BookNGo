@@ -739,19 +739,19 @@ function add_pdf_download_script() {
     ?>
     <script>
     document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.download-pdf').forEach(button => {
-            button.addEventListener('click', () => {
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF();
+        document.querySelectorAll('.download-pdf, .invoice-link').forEach(element => {
+element.addEventListener('click', () => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
 
-                // Data from button
-                const invoiceNumber = button.dataset.invoiceNumber;
-                const customerName = button.dataset.customerName;
-                const startDate = button.dataset.startDate;
-                const endDate = button.dataset.endDate;
-                const amount = button.dataset.amount;
-                const bookingType = button.dataset.bookingType; // Added booking type
-                const today = new Date().toLocaleDateString();
+    // Data from element (either button or link)
+    const invoiceNumber = element.dataset.invoiceNumber;
+    const customerName = element.dataset.customerName;
+    const startDate = element.dataset.startDate;
+    const endDate = element.dataset.endDate;
+    const amount = element.dataset.amount;
+    const bookingType = element.dataset.bookingType;
+    const today = new Date().toLocaleDateString();
 
                 // INVOICE Title (Top-right corner)
                 doc.setFontSize(20);
@@ -1088,7 +1088,20 @@ if (!empty($to_date) && strtotime($booking->start_date) > strtotime($to_date)) {
         if ($booking) {
         echo '<tr>';
             echo '<td><input type="checkbox" class="invoice-checkbox" name="selected_invoices[]" value="' . esc_attr($invoice->invoice_number) . '"></td>';
-            echo '<td>' . esc_html($invoice->invoice_number) . '</td>';
+            echo '<td>
+    <a href="#" 
+        class="invoice-link" 
+        data-invoice-number="' . esc_attr($invoice->invoice_number) . '"
+        data-customer-name="' . esc_attr($invoice->customer_name) . '"
+        data-start-date="' . esc_attr($invoice->start_date) . '"
+        data-end-date="' . esc_attr($invoice->end_date) . '"
+        data-booking-type="' . esc_attr($invoice->booking_type) . '"
+        data-amount="' . esc_attr(number_format($invoice->amount, 2)) . '"
+        style="color: #2271b1; text-decoration: underline; cursor: pointer;">
+        ' . esc_html($invoice->invoice_number) . '
+    </a>
+</td>';
+
             echo '<td>' . esc_html(date('Y-m-d', strtotime($invoice->date_created))) . '</td>';
             echo '<td>' . esc_html($booking->customer_name) . '</td>';
             echo '<td>' . esc_html($booking->description) . '</td>';
@@ -1272,6 +1285,13 @@ function handle_payment_slip_upload() {
                         $invoice_id
                     )
                 );
+                // Get invoice month
+                $month_name = $wpdb->get_row(
+                    $wpdb->prepare(
+                        "SELECT month_name FROM {$wpdb->prefix}booking_invoices WHERE id = %d",
+                        $invoice_id
+                    )
+                );
 
                 if ($invoice) {
                     // Update payment slip and status
@@ -1299,7 +1319,21 @@ function handle_payment_slip_upload() {
                             $customer_name
                         )
                     );
-
+                    // Get customer details using customer_name
+                    $customer_phone = $wpdb->get_row(
+                        $wpdb->prepare(
+                            "SELECT customer_phone FROM {$wpdb->prefix}booking_customers WHERE customer_name = %s",
+                            $customer_name
+                        )
+                    );
+                    
+                    // Get amount from invoice
+                    $amount = $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT amount FROM {$wpdb->prefix}booking_invoices WHERE id = %d",
+                            $invoice_id
+                        )
+                    );
                     if ($customer_email) {
                         // Reset restriction
                         $wpdb->update(
@@ -1310,13 +1344,64 @@ function handle_payment_slip_upload() {
 
                         // Send email
                         $subject = 'Payment Received – Invoice ' . $invoice->invoice_number;
-                        $message = "Dear $customer_name,\r\n\r\n" .
-                                   "We have received your payment and your invoice has been marked as Paid.\r\n" .
-                                   "Thank you for your prompt payment.\r\n\r\n" .
-                                   "Best regards,\r\n" .
-                                   get_bloginfo('name') . " Makerspace Team";
+                            $message = "
+<div style='font-family: Arial, sans-serif; background-color: #f9f9f9; padding: 20px;'>
+    <div style='max-width: 600px; margin: auto; background: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.05);'>
 
-                        $headers = array('Content-Type: text/plain; charset=UTF-8');
+        <!-- Logo and Company Info -->
+        <div style='text-align: center; margin-bottom: 20px;'>
+            <img src='https://makerspace.lk/wp-content/uploads/2025/02/Makerspace-Logo-25p.png' alt='Company Logo' style='height: 60px; margin-bottom: 10px;' />
+            <div style='font-size: 14px; color: #333;'>
+                <strong>" . get_bloginfo('name') . " Makerspace</strong><br>
+                122/5, Attidiya Road, Bellantara Ln, Dehiwala.<br>
+                +94 774 757 677 | info@makerspace.lk
+            </div>
+        </div>
+
+        <!-- Payment Confirmation Title -->
+        <h2 style='color: #f66e03; text-align: center;'>Payment Confirmation</h2>
+            <p>Dear <strong>$customer_name</strong>,</p>
+            <p>We have received your payment for <strong>Invoice #{$invoice->invoice_number}</strong>.</p>
+            
+        <!-- Customer Details -->
+        <h3 style='color: #333; border-bottom: 1px solid #eee; margin-top: 30px;'>Customer Details</h3>
+        <table style='width: 100%; margin-bottom: 20px; font-size: 14px; color: #333;'>
+            <tr>
+                <td style='padding: 8px; font-weight: bold; width: 150px;'>Name:</td>
+                <td style='padding: 8px;'>$customer_name</td>
+            </tr>
+            <tr>
+                <td style='padding: 8px; font-weight: bold;'>Phone:</td>
+                <td style='padding: 8px;'>{$customer_phone->customer_phone}</td>
+            </tr>
+            <tr>
+                <td style='padding: 8px; font-weight: bold;'>Email:</td>
+                <td style='padding: 8px;'>$customer_email</td>
+            </tr>
+        </table>
+
+        <!-- Payment Details -->
+        <h3 style='color: #333; border-bottom: 1px solid #eee;'>Payment Details</h3>
+        <table style='width: 100%; margin-bottom: 20px; font-size: 14px; color: #333;'>
+            <tr>
+                <td style='padding: 8px; font-weight: bold; width: 150px;'>Amount Paid:</td>
+                <td style='padding: 8px;'>Rs. " . number_format($amount, 2) . "</td>
+            </tr>
+            <tr>
+                <td style='padding: 8px; font-weight: bold;'>Paid Month:</td>
+                <td style='padding: 8px;'>{$month_name->month_name}</td>
+            </tr>
+        </table>
+
+        <!-- Footer -->
+        <p style='font-size: 14px;'>If you have any questions, feel free to contact us at <strong>info@makerspace.lk</strong>.</p>
+        <p style='margin-top: 30px;'>Thank you for your prompt payment.<br>
+        <strong>" . get_bloginfo('name') . " Makerspace Team</strong></p>
+        </div>
+    </div>
+    ";
+
+                        $headers = array('Content-Type: text/html; charset=UTF-8');
 
                         booking_calendar_send_custom_email($customer_email, $subject, $message, $headers);
                     }
