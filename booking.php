@@ -1,5 +1,6 @@
 <?php   
 
+
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -1789,7 +1790,14 @@ foreach ($monthly_bookings as $month => $dates) {
 
     if ($month_index === 0 && !$skip_invoices) {
         // Insert into main invoice table
-        $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+        $now = current_time('Y-m-d');
+$date_parts = explode('-', $now);
+$year = substr($date_parts[0], 2, 2); // '25'
+$month = str_pad($date_parts[1], 2, '0', STR_PAD_LEFT); // '06'
+$day = str_pad($date_parts[2], 2, '0', STR_PAD_LEFT);   // '07'
+
+$invoice_number = 'TR' . $year . $month . $day . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+
         $invoice_counter++;
 
         $wpdb->insert(
@@ -1808,7 +1816,7 @@ foreach ($monthly_bookings as $month => $dates) {
         $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
 
         if ($customer_email) {
-    send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates);
+    send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name,$booking_type, $dates);
 
     // Schedule 3 reminders, each 3 minutes apart
     for ($i = 1; $i <= 3; $i++) {
@@ -2070,7 +2078,14 @@ $wpdb->query(
 
     // Generate invoice number
     $invoice_counter = get_option('invoice_counter', 1);
-    $invoice_number = 'INV-' . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+    $now = current_time('Y-m-d');
+$date_parts = explode('-', $now);
+$year = substr($date_parts[0], 2, 2); // '25'
+$month = str_pad($date_parts[1], 2, '0', STR_PAD_LEFT); // '06'
+$day = str_pad($date_parts[2], 2, '0', STR_PAD_LEFT);   // '07'
+
+$invoice_number = 'TR' . $year . $month . $day . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+
     update_option('invoice_counter', $invoice_counter + 1);
 
     // Insert into main invoice table
@@ -2100,6 +2115,7 @@ $wpdb->query(
             $draft['amount'],
             [$invoice_url],
             $booking['customer_name'],
+            $booking['booking_type'],
             $booking_dates,
             $draft['month_name']
         );
@@ -2206,7 +2222,7 @@ $wpdb->query(
 // Include the FPDF library
 require_once( plugin_dir_path( __FILE__ ) . 'fpdf/fpdf.php'); // Correct path to fpdf library
 
-function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name, $dates, $month_name = null) {
+function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name,$booking_type, $dates, $month_name = null) {
     // If month_name is not provided, fall back to first booking date month
     if (!$month_name && !empty($dates)) {
         $month_name = date('F Y', strtotime(reset($dates)));
@@ -2217,65 +2233,95 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
     $pdf = new FPDF();
     $pdf->AddPage();
     
-    // Invoice Title (Top-right corner)
-    $pdf->SetFont('Helvetica', 'B', 20);
-    $pdf->SetXY(160, 10);
-    $pdf->Cell(40, 10, 'INVOICE');
+    // Logo
 
-    // Company Name
-    $pdf->SetXY(20, 30);
-    $pdf->SetFont('Helvetica', 'B', 16);
-    $pdf->Cell(0, 10, 'Lankatronics Pvt Ltd', 0, 1);
+    // Header Title
+    $pdf->SetFont('Arial', 'B', 22);
+    $pdf->SetXY(55, 10);
+    $pdf->SetTextColor(255, 130, 0); // Orange
+    $pdf->Cell(100, 10, 'TESLA ROBOTICS');
 
-    // Invoice Date (Top-right)
-    $today = date('Y-m-d');
-    $pdf->SetFont('Helvetica', '', 11);
-    $pdf->SetXY(150, 30);
-    $pdf->Cell(0, 10, 'Invoice Date: ' . $today, 0, 1, 'R');
+    // Contact Details
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->SetTextColor(0);
+    $pdf->SetXY(140, 10);
+    $pdf->MultiCell(60, 5, "8, 1/4, Sunethradevi Road\nKohuwala\nSri Lanka\nTel: 071 4436737 / 077 5678000\nEmail: info@makerspace.lk\nWeb: www.makerspace.lk\nRegd. No.: PV00298446");
 
-    // Company Address
-    $pdf->SetFont('Helvetica', '', 11);
-    $pdf->SetXY(20, 45);
-    $pdf->MultiCell(0, 6, "No. 8, 1/3, Sunethradevi Road,\nKohuwala, Nugegoda, Sri Lanka\nPhone: 077 5678 000\nEmail: info@lankatronics.lk", 0);
+    // Subtitle
+    $pdf->SetFont('Arial', 'B', 12);
+    $pdf->SetXY(55, 20);
+    $pdf->SetTextColor(50, 50, 50);
+    $pdf->Cell(100, 10, 'MAKERSPACE.LK');
+    $pdf->SetXY(55, 26);
+    $pdf->Cell(100, 10, 'TESLA ROBOTICS (PVT) LTD.');
 
-    // Invoice Number
-    $pdf->SetXY(20, 75);
-    $pdf->SetFont('Helvetica', '', 12);
-    $pdf->Cell(0, 10, 'Invoice Number: #' . $invoice_number, 0, 1);
-
-    // Customer Info
-    $pdf->SetXY(20, 100); // Set position for title
-    $pdf->SetFont('Helvetica', 'B', 12);
-    $pdf->Cell(50, 10, 'Customer Information', 0, 1); // Define a fixed width (50)
-    
-    $pdf->SetXY(20, 110); // Set position for the next line
-    $pdf->SetFont('Helvetica', '', 12);
-    $pdf->Cell(50, 10, 'Name: ' . $customer_name, 0, 1); // Use the same fixed width
+    // Orange Line
+    $pdf->SetDrawColor(255, 153, 51);
+    $pdf->SetLineWidth(1.5);
 
 
-    // Booking Details Table
-    $pdf->Ln(8);
-    $pdf->SetFont('Helvetica', 'B', 12);
-    $pdf->Cell(0, 10, 'Booking Details', 0, 1);
-    
-    // Table Header
-    $pdf->SetFont('Helvetica', 'B', 10);
-    $pdf->SetFillColor(200, 200, 200);
-    $pdf->Cell(60, 10, 'Booking Type', 1, 0, 'C', true);
-    $pdf->Cell(60, 10, 'Start to End Date', 1, 0, 'C', true);
-    $pdf->Cell(60, 10, 'Total Amount', 1, 1, 'C', true);
+    // INVOICE title
+    $pdf->SetFont('Arial', 'B', 14);
+    $pdf->SetXY(80, 45);
+    $pdf->SetTextColor(0);
+    $pdf->Cell(50, 10, 'INVOICE', 0, 1, 'C');
 
-    // Table Content (Dynamic Row)
-    $pdf->SetFont('Helvetica', '', 10);
-    $pdf->Cell(60, 10, 'Class Rent', 1, 0, 'C');
-    $pdf->Cell(60, 10, reset($dates) . ' to ' . end($dates), 1, 0, 'C');
-    $pdf->Cell(60, 10, 'Rs. ' . number_format((float)$amount, 2), 1, 1, 'C');
 
-    // Footer
-    $pdf->Ln(15);
-    $pdf->SetFont('Helvetica', 'I', 10);
-    $pdf->Cell(0, 10, 'Thank you for your booking!', 0, 1, 'C');
-    $pdf->Cell(0, 10, 'Visit us at: www.lankatronics.lk', 0, 1, 'C');
+    // Customer & Invoice Details (Smaller Width Table)
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->SetDrawColor(0); // Black border
+    $pdf->SetFillColor(255); // White fill
+    $pdf->SetLineWidth(0);
+    // Customer and Invoice Details
+    $pdf->SetFont('Arial', '', 11);
+    $pdf->SetXY(10, 60);
+    $pdf->Cell(100, 10, "Customer: $customer_name", 1);
+    $pdf->SetXY(110, 60);
+    $pdf->Cell(45, 10, "Invoice No.", 1);
+    $pdf->Cell(35, 10, $invoice_number, 1);
+
+    $pdf->SetXY(10, 70);
+    $pdf->Cell(100, 10, '', 1); // Empty row
+    $pdf->SetXY(110, 70);
+    $pdf->Cell(45, 10, "Date", 1);
+    $pdf->Cell(35, 10, date('d/m/Y'), 1);
+
+    $pdf->SetXY(110, 80);
+    $pdf->Cell(45, 10, "Month", 1);
+    $pdf->Cell(35, 10, $month_name, 1);
+
+    // Item Table Header
+    $pdf->SetXY(10, 100);
+    $pdf->SetFont('Arial', 'B', 10);
+    $pdf->SetFillColor(255, 153, 51);
+    $pdf->Cell(10, 10, 'No', 1, 0, 'C', true);
+    $pdf->Cell(80, 10, 'Description', 1, 0, 'C', true);
+    $pdf->Cell(30, 10, 'Quantity', 1, 0, 'C', true);
+    $pdf->Cell(35, 10, 'Unit Price', 1, 0, 'C', true);
+    $pdf->Cell(35, 10, 'Subtotal', 1, 1, 'C', true);
+
+    // Example Items
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->Cell(10, 10, '1', 1);
+    $pdf->Cell(80, 10, $booking_type, 1);
+    $pdf->Cell(30, 10, '1', 1);
+    $pdf->Cell(35, 10, number_format((float)$amount, 2), 1);
+    $pdf->Cell(35, 10, number_format((float)$amount, 2), 1, 1);
+
+    $pdf->Cell(10, 10, '2', 1);
+    $pdf->Cell(80, 10, '', 1);
+    $pdf->Cell(30, 10, '', 1);
+    $pdf->Cell(35, 10, '', 1);
+    $pdf->Cell(35, 10, '', 1, 1);
+
+    // Total Row
+    $pdf->Cell(155, 10, 'Total Amount (LKR)', 1);
+    $pdf->Cell(35, 10, number_format((float)$amount, 2), 1, 1);
+
+    // Footer Note
+    $pdf->Ln(10);
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->MultiCell(0, 7, 'I hereby agree that the above goods were received by me in good condition.');
 
     // Save PDF and Send Email
     $upload_dir = wp_upload_dir();
