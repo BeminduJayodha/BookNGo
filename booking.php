@@ -1816,7 +1816,7 @@ $invoice_number = 'TR' . $year . $month . $day . str_pad($invoice_counter, 5, '0
         $invoice_urls[] = admin_url('admin.php?page=view-invoice&invoice_id=' . $invoice_id);
 
         if ($customer_email) {
-    send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name,$booking_type, $dates);
+    send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name,$booking_type,$start_time,$end_time, $dates);
 
     // Schedule 3 reminders, each 3 minutes apart
     for ($i = 1; $i <= 3; $i++) {
@@ -2116,6 +2116,8 @@ $invoice_number = 'TR' . $year . $month . $day . str_pad($invoice_counter, 5, '0
             [$invoice_url],
             $booking['customer_name'],
             $booking['booking_type'],
+            $booking['start_time'],
+            $booking['end_time'],
             $booking_dates,
             $draft['month_name']
         );
@@ -2222,7 +2224,7 @@ $invoice_number = 'TR' . $year . $month . $day . str_pad($invoice_counter, 5, '0
 // Include the FPDF library
 require_once( plugin_dir_path( __FILE__ ) . 'fpdf/fpdf.php'); // Correct path to fpdf library
 
-function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name,$booking_type, $dates, $month_name = null) {
+function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_urls, $customer_name,$booking_type,$start_time,$end_time, $dates, $month_name = null) {
     // If month_name is not provided, fall back to first booking date month
     if (!$month_name && !empty($dates)) {
         $month_name = date('F Y', strtotime(reset($dates)));
@@ -2230,11 +2232,16 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
         // default month name if dates empty
         $month_name = date('F Y');
     }
+    
     $pdf = new FPDF();
     $pdf->AddPage();
     
     // Logo
-
+// Add Logo
+$logo_path = plugin_dir_path(__FILE__) . 'images/logo.png'; // Adjust path as needed
+if (file_exists($logo_path)) {
+    $pdf->Image($logo_path, 10, 10, 40); // X=10, Y=10, Width=40mm
+}
     // Header Title
     $pdf->SetFont('Arial', 'B', 22);
     $pdf->SetXY(55, 10);
@@ -2302,17 +2309,34 @@ function send_invoice_email($customer_email, $invoice_number, $amount, $invoice_
 
     // Example Items
     $pdf->SetFont('Arial', '', 10);
+// Calculate duration in hours
+$start = new DateTime($start_time);
+$end = new DateTime($end_time);
+$interval = $start->diff($end);
+$duration_in_hours = $interval->h + ($interval->i / 60);
+if ($duration_in_hours == 0) {
+    $duration_in_hours = 1;
+}
+
+// Calculate unit price based on duration
+$unit_price = $amount / $duration_in_hours;
     $pdf->Cell(10, 10, '1', 1);
-    $pdf->Cell(80, 10, $booking_type, 1);
-    $pdf->Cell(30, 10, '1', 1);
-    $pdf->Cell(35, 10, number_format((float)$amount, 2), 1);
+if (strtolower($booking_type) === 'class rent') {
+    $description = 'Class Rent (' . $start_time . ' to ' . $end_time . ')';
+} else {
+    $description = ucfirst($booking_type) . ' (' . $start_time . ' to ' . $end_time . ')';
+}
+$pdf->Cell(80, 10, $description, 1);
+
+    $pdf->Cell(30, 10, number_format((float)$duration_in_hours, 2), 1);
+    $pdf->Cell(35, 10, number_format((float)$unit_price, 2), 1);
     $pdf->Cell(35, 10, number_format((float)$amount, 2), 1, 1);
 
-    $pdf->Cell(10, 10, '2', 1);
-    $pdf->Cell(80, 10, '', 1);
-    $pdf->Cell(30, 10, '', 1);
-    $pdf->Cell(35, 10, '', 1);
-    $pdf->Cell(35, 10, '', 1, 1);
+    //$pdf->Cell(10, 10, '2', 1);
+    //$pdf->Cell(80, 10, '', 1);
+    //$pdf->Cell(30, 10, '', 1);
+    //$pdf->Cell(35, 10, '', 1);
+    //$pdf->Cell(35, 10, '', 1, 1);
 
     // Total Row
     $pdf->Cell(155, 10, 'Total Amount (LKR)', 1);
