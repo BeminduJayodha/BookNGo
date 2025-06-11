@@ -1,6 +1,5 @@
 <?php   
 
-
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
     exit;
@@ -1598,6 +1597,35 @@ function reset_invoice_counter_on_activation() {
 }
 register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
+function get_invoice_number_from_google_sheet() { 
+    $google_script_url = 'https://script.google.com/macros/s/AKfycbxxW17spw0ZzywI4RI9X5YYNO37LBT8FfXDAKjNqMzKnQRI5IAMZXeCWqOnOqtZfp6HGQ/exec?action=increment';
+
+    $response = wp_remote_get($google_script_url);
+
+    if (is_wp_error($response)) {
+        return new WP_Error('api_error', 'Failed to connect to Google Script API: ' . $response->get_error_message());
+    }
+
+    $body = wp_remote_retrieve_body($response);
+
+    if (empty($body)) {
+        return new WP_Error('api_error', 'Empty response body from Google Script API.');
+    }
+
+    $data = json_decode($body, true);
+
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        return new WP_Error('api_error', 'JSON decode error: ' . json_last_error_msg());
+    }
+
+    if (!isset($data['invoice'])) {
+        return new WP_Error('api_error', 'Invoice key not found in API response. Response: ' . print_r($data, true));
+    }
+
+    return $data['invoice'];
+}
+
+
 
 
 function save_booking() {   
@@ -1796,7 +1824,12 @@ $year = substr($date_parts[0], 2, 2); // '25'
 $month = str_pad($date_parts[1], 2, '0', STR_PAD_LEFT); // '06'
 $day = str_pad($date_parts[2], 2, '0', STR_PAD_LEFT);   // '07'
 
-$invoice_number = 'TR' . $year . $month . $day . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+$invoice_number = get_invoice_number_from_google_sheet();
+if (is_wp_error($invoice_number)) {
+    wp_send_json_error(['message' => $invoice_number->get_error_message()]);
+    return;
+}
+
 
         $invoice_counter++;
 
@@ -2084,7 +2117,11 @@ $year = substr($date_parts[0], 2, 2); // '25'
 $month = str_pad($date_parts[1], 2, '0', STR_PAD_LEFT); // '06'
 $day = str_pad($date_parts[2], 2, '0', STR_PAD_LEFT);   // '07'
 
-$invoice_number = 'TR' . $year . $month . $day . str_pad($invoice_counter, 5, '0', STR_PAD_LEFT);
+$invoice_number = get_invoice_number_from_google_sheet();
+if (is_wp_error($invoice_number)) {
+    wp_send_json_error(['message' => $invoice_number->get_error_message()]);
+    return;
+}
 
     update_option('invoice_counter', $invoice_counter + 1);
 
