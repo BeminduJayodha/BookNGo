@@ -1598,7 +1598,7 @@ function reset_invoice_counter_on_activation() {
 register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
 function get_invoice_number_from_google_sheet() { 
-    $google_script_url = 'https://script.google.com/macros/s/AKfycbxxW17spw0ZzywI4RI9X5YYNO37LBT8FfXDAKjNqMzKnQRI5IAMZXeCWqOnOqtZfp6HGQ/exec?action=increment';
+    $google_script_url = 'https://script.google.com/macros/s/AKfycbwoJRuYNItBFlBnUUWIpvk0Fea7peLTVNAeUzvlRVllaEuGai5PJOGIGQ1aO_WfxQSFLQ/exec?action=increment';
 
     $response = wp_remote_get($google_script_url);
 
