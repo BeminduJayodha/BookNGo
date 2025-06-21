@@ -1,4 +1,10 @@
 <?php   
+/**
+ * Plugin Name: Booking Calendar Plugin
+ * Description: A plugin for admin to book time slots and display them with colors.
+ * Version: 1.0
+ * Author: makerspace
+ */
 
 // Exit if accessed directly
 if (!defined('ABSPATH')) {
@@ -1597,34 +1603,49 @@ function reset_invoice_counter_on_activation() {
 }
 register_activation_hook(__FILE__, 'reset_invoice_counter_on_activation');
 
-function get_invoice_number_from_google_sheet() { 
-    $google_script_url = 'https://script.google.com/macros/s/AKfycbwoJRuYNItBFlBnUUWIpvk0Fea7peLTVNAeUzvlRVllaEuGai5PJOGIGQ1aO_WfxQSFLQ/exec?action=increment';
 
-    $response = wp_remote_get($google_script_url);
+function get_invoice_number_from_google_sheet() {
+    $google_web_app_url = 'https://script.google.com/macros/s/AKfycbxFf9zMcl7rIkI4JgVsWqNuzwoAQJKzVJfv8w46RP0qO3nk9Yww79QFNEo2QbYY0dCM/exec'; // Replace with your Web App URL
+
+    $response = wp_remote_get($google_web_app_url);
 
     if (is_wp_error($response)) {
-        return new WP_Error('api_error', 'Failed to connect to Google Script API: ' . $response->get_error_message());
+        return new WP_Error('google_sheet_error', 'Error fetching invoice number from Google Sheet.');
+    }
+
+    $invoice_number = wp_remote_retrieve_body($response);
+
+    if (empty($invoice_number)) {
+        return new WP_Error('empty_invoice_number', 'No invoice number returned from Google Sheet.');
+    }
+
+    return sanitize_text_field($invoice_number);
+}
+
+
+
+function update_invoice_number_in_google_sheet($invoice_number) {
+    $google_web_app_url = 'https://script.google.com/macros/s/AKfycbxFf9zMcl7rIkI4JgVsWqNuzwoAQJKzVJfv8w46RP0qO3nk9Yww79QFNEo2QbYY0dCM/exec';
+
+    $response = wp_remote_post($google_web_app_url, [
+        'body' => [
+            'invoice_number' => $invoice_number
+        ]
+    ]);
+
+    if (is_wp_error($response)) {
+        return new WP_Error('google_sheet_error', 'Error updating invoice number in Google Sheet.');
     }
 
     $body = wp_remote_retrieve_body($response);
+    $result = json_decode($body, true);
 
-    if (empty($body)) {
-        return new WP_Error('api_error', 'Empty response body from Google Script API.');
+    if (empty($result['success']) || !$result['success']) {
+        return new WP_Error('google_sheet_update_error', $result['message'] ?? 'Unknown error.');
     }
 
-    $data = json_decode($body, true);
-
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        return new WP_Error('api_error', 'JSON decode error: ' . json_last_error_msg());
-    }
-
-    if (!isset($data['invoice'])) {
-        return new WP_Error('api_error', 'Invoice key not found in API response. Response: ' . print_r($data, true));
-    }
-
-    return $data['invoice'];
+    return true;
 }
-
 
 
 
@@ -1828,6 +1849,10 @@ $invoice_number = get_invoice_number_from_google_sheet();
 if (is_wp_error($invoice_number)) {
     wp_send_json_error(['message' => $invoice_number->get_error_message()]);
     return;
+}
+$update_result = update_invoice_number_in_google_sheet($invoice_number);
+if (is_wp_error($update_result)) {
+    error_log('Failed to update Class Sales sheet: ' . $update_result->get_error_message());
 }
 
 
