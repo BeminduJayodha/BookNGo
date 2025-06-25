@@ -86,23 +86,28 @@ function doPost(e) {
 
     const invoiceColumn = 3; // Column C
 
-    // ✅ Improved way to find the next empty row in Column C
+    // Find next empty row in Column C
     const invoiceData = targetSheet.getRange('C2:C' + targetSheet.getLastRow()).getValues().flat();
     let nextEmptyRow = invoiceData.findIndex(cell => !cell) + 2;
 
     if (nextEmptyRow < 2) {
-      nextEmptyRow = targetSheet.getLastRow() + 1; // If no empty rows found, go to next row
+      nextEmptyRow = targetSheet.getLastRow() + 1;
     }
 
-    // ✅ Write the invoice number
+    // Write the invoice number to Column C
     targetSheet.getRange(nextEmptyRow, invoiceColumn).setValue(invoiceNumber);
+
+    //Write today's date to Column A (formatted as YYYY-MM-DD)
+    const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    targetSheet.getRange(nextEmptyRow, 1).setValue(today); // Column A = 1
 
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
-      message: 'Invoice number updated successfully.',
+      message: 'Invoice number and date updated successfully.',
       updatedFile: latestFileName,
       updatedRow: nextEmptyRow,
-      invoiceNumber: invoiceNumber
+      invoiceNumber: invoiceNumber,
+      invoiceDate: today
     })).setMimeType(ContentService.MimeType.JSON);
 
   } catch (error) {
